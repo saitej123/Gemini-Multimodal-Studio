@@ -2368,14 +2368,22 @@ def social_metadata(job_id: str, req: SocialMetaRequest, request: Request) -> di
 @app.get("/files/{job_id}/{path:path}")
 def get_file(job_id: str, path: str, request: Request):
     _job_for_user(request, job_id)
-    base = _safe_job_dir(job_id)
-    target = (base / path).resolve()
-    if not base.is_relative_to(WORKSPACE_DIR.resolve()):
+    from .workspace_store import resolve_job_dir
+
+    # create=True so a restarted Cloud Run instance can pull the file back
+    # from Cloud Storage into a fresh folder. Traversal checks still apply.
+    base = resolve_job_dir(job_id, create=True).resolve()
+    root = WORKSPACE_DIR.resolve()
+    if not base.is_relative_to(root):
         raise HTTPException(403, "Forbidden")
+    target = (base / path).resolve()
     if base not in target.parents and target != base:
         raise HTTPException(403, "Forbidden")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(404, "File not found")
+    if not target.is_file():
+        from . import blob_store
+
+        if not blob_store.fetch(job_id, path, target):
+            raise HTTPException(404, "File not found")
 
     import mimetypes
 

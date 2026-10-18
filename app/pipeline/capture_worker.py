@@ -124,7 +124,12 @@ def main() -> int:
         # frame->time math matches the worker.
         page.add_init_script(f"window.__captureFps = {fps};")
         page.add_init_script(f"window.__entranceSeconds = {entrance_seconds};")
-        page.goto(html_uri)
+        # "load" waits for Google Fonts and the CDN stylesheets. On Cloud Run
+        # that request often never finishes, so the capture stage spins forever.
+        # DOM-ready is enough; fonts get a short extra wait and then we shoot.
+        page.set_default_navigation_timeout(25000)
+        page.set_default_timeout(20000)
+        page.goto(html_uri, wait_until="domcontentloaded", timeout=25000)
         # Wait until the page module finished loading and exposed gotoSlide
         # (the Mermaid ESM import is async). Then render each slide on demand.
         try:
@@ -133,6 +138,13 @@ def main() -> int:
             )
         except Exception:
             page.wait_for_timeout(1500)
+        try:
+            page.wait_for_function(
+                "() => !document.fonts || document.fonts.status === 'loaded'",
+                timeout=4000,
+            )
+        except Exception:
+            pass
         # Hide the on-screen nav HUD (and disable wall-clock CSS entrances in the
         # page) so captured frames are clean and deterministic.
         try:

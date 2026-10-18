@@ -9,6 +9,8 @@ Design goals:
 """
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 from . import costs
@@ -20,6 +22,30 @@ from .pipeline import content, extract, media, publish
 from .pipeline import metadata as meta_gen
 from .pipeline import thumbnail as thumb_gen
 from .video_options import get_video_spec, resolve_output_dimensions
+
+
+def _pulse(job: Job, key: str, prog: dict):
+    """Keep a long stage's detail line moving so the UI does not look frozen."""
+    stop = threading.Event()
+    started = time.time()
+
+    def _run() -> None:
+        while not stop.wait(8):
+            elapsed = int(time.time() - started)
+            store.note(job, key, f"{prog.get('line') or 'Working'} · {elapsed}s")
+
+    threading.Thread(target=_run, name=f"pulse-{key}", daemon=True).start()
+    return stop
+
+
+def _keep_files(job: Job) -> None:
+    """Copy durable artifacts to Cloud Storage when a bucket is configured."""
+    try:
+        from . import blob_store
+
+        blob_store.sync_workspace_async(job.id, _work(job))
+    except Exception as e:  # noqa: BLE001
+        log.bind(task="pipeline").warning(f"file sync skipped: {e}")
 
 
 def _work(job: Job) -> Path:
@@ -416,6 +442,13 @@ def stage_narrate(job: Job) -> None:
         return
 
     store.set_stage(job, "narrate", StageStatus.RUNNING)
+    voice_prog = {"line": f"Recording voiceover for {len(narrations)} slides"}
+    stop_pulse = _pulse(job, "narrate", voice_prog)
+
+    def _voiced(done: int, total: int) -> None:
+        voice_prog["line"] = f"Voiced {done} of {total} slides"
+        store.note(job, "narrate", voice_prog["line"])
+
     try:
         audio_dir = work / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
@@ -488,6 +521,7 @@ def stage_narrate(job: Job) -> None:
                     todo,
                     voice=gemini_voice,
                     workers=get_settings().effective_llm_parallel(),
+                    on_done=_voiced,
                 )
             for i in range(len(narrations)):
                 p_ = slots[i]
@@ -503,6 +537,7 @@ def stage_narrate(job: Job) -> None:
                 narrations,
                 audio_dir,
                 voice=gemini_voice,
+                on_done=_voiced,
             )
         store.set_content(
             job, "audio_files", [str(p.relative_to(work)) for p in paths]
@@ -567,6 +602,8 @@ def stage_narrate(job: Job) -> None:
     except Exception as e:
         log.bind(task="narrate").warning(f"TTS failed: {e}")
         store.set_stage(job, "narrate", StageStatus.SKIPPED, f"TTS failed: {e}")
+    finally:
+        stop_pulse.set()
 
 
 def stage_capture(job: Job) -> None:
@@ -588,6 +625,8 @@ def stage_capture(job: Job) -> None:
         return
 
     store.set_stage(job, "capture", StageStatus.RUNNING)
+    capture_prog = {"line": f"Filming {len(slides)} slides"}
+    stop_pulse = _pulse(job, "capture", capture_prog)
     try:
         settings = get_settings()
         spec = get_video_spec(job.options.get("video_format"))
@@ -715,6 +754,8 @@ def stage_capture(job: Job) -> None:
     except Exception as e:
         store.set_stage(job, "capture", StageStatus.ERROR, str(e))
         raise
+    finally:
+        stop_pulse.set()
 
 
 def stage_merge(job: Job) -> None:
@@ -982,7 +1023,10 @@ def run_pipeline(job: Job, *, finalize: bool = True) -> None:
     with costs.job_context(job.id):
         try:
             for key, _ in [(s.key, s.label) for s in job.stages]:
-                STAGE_FUNCS[key](job)
+                try:
+                    STAGE_FUNCS[key](job)
+                finally:
+                    _keep_files(job)
             _raise_if_stage_errors(job)
             store.set_result(job, "done")
             if finalize:
@@ -1009,7 +1053,10 @@ def run_single_stage(job: Job, key: str) -> None:
     store.set_result(job, "running")
     with costs.job_context(job.id):
         try:
-            STAGE_FUNCS[key](job)
+            try:
+                STAGE_FUNCS[key](job)
+            finally:
+                _keep_files(job)
             _raise_if_stage_errors(job)
             store.set_result(job, "done")
             if key in {"merge", "publish_meta", "publish", "capture"}:
@@ -1039,7 +1086,10 @@ def run_from_stage(job: Job, key: str) -> None:
     with costs.job_context(job.id):
         try:
             for k in keys[start:]:
-                STAGE_FUNCS[k](job)
+                try:
+                    STAGE_FUNCS[k](job)
+                finally:
+                    _keep_files(job)
             _raise_if_stage_errors(job)
             store.set_result(job, "done")
             try:

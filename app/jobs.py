@@ -139,6 +139,46 @@ class JobStore:
                     self._persist(job)
         except Exception:
             pass
+        self._hydrate_remote()
+
+    def _hydrate_remote(self) -> None:
+        """Fill history from Firestore when this instance has no local copy.
+
+        Cloud Run disk is empty after a restart. SQLite is loaded first; jobs
+        that exist only in Firestore are added here so the session list and
+        the slide script come back. The image files themselves are fetched
+        from Cloud Storage when a browser asks for them.
+        """
+        try:
+            from .firestore_sync import hosted, load_snapshots
+
+            if not hosted():
+                return
+            snaps = load_snapshots()
+        except Exception:
+            return
+        for snap in snaps:
+            job_id = str(snap.get("id") or "")
+            if not job_id:
+                continue
+            with self._lock:
+                if job_id in self._jobs:
+                    continue
+            try:
+                job = _job_from_snapshot(snap)
+            except Exception:
+                continue
+            if job.status == "running":
+                job.status = "error"
+                job.error = job.error or "Interrupted by server restart"
+            for stage in job.stages:
+                if stage.status == StageStatus.RUNNING:
+                    stage.status = StageStatus.ERROR
+                    stage.detail = stage.detail or "Interrupted by server restart"
+            with self._lock:
+                if job_id not in self._jobs:
+                    self._jobs[job_id] = job
+                    self._subscribers.setdefault(job_id, [])
 
     def list_jobs(self, *, user_id: str | None = None, admin: bool = False) -> list[dict]:
         """History rows (newest first) for the session tabs + Sessions gallery."""
@@ -316,6 +356,17 @@ class JobStore:
                 s.ended_at = None
             if status in (StageStatus.DONE, StageStatus.SKIPPED, StageStatus.ERROR):
                 s.ended_at = time.time()
+        self._publish(job)
+
+    def note(self, job: Job, key: str, detail: str) -> None:
+        """Update a stage's detail line without resetting its timer.
+
+        Long stages (voice, capture) call this so the UI shows they are still
+        moving. ``set_stage(..., RUNNING)`` would restart ``started_at``.
+        """
+        with self._lock:
+            stage = self.stage(job, key)
+            stage.detail = detail
         self._publish(job)
 
     def reset_stages(self, job: Job, keys: list[str]) -> None:

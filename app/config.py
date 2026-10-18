@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     # final video fps because entrance + highlight transitions read fine at a
     # modest rate, and every extra fps multiplies the screenshot count. The final
     # video is still encoded at capture_fps; ffmpeg upsamples the held frames.
-    motion_fps: int = 24
+    motion_fps: int = 12
     # When True the item highlight (active bullet/step/stat) walks through the
     # slide IN TIME with the narration: the whole slide duration is seek-captured
     # at motion_fps so on-screen focus stays synced to what's being explained.
@@ -214,7 +214,7 @@ class Settings(BaseSettings):
     # Max PNG screenshots per slide during animated capture. When the narration-
     # synced timeline would exceed this, only entrance + highlight-transition
     # keyframes are captured (timing is preserved via keyframes.json).
-    max_motion_frames: int = 144
+    max_motion_frames: int = 72
     # How many Playwright worker processes capture slides in parallel. Slides are
     # split into this many disjoint batches, each rendered in its own browser,
     # then the segments are assembled. 0 = auto (based on CPU count).
@@ -292,6 +292,10 @@ class Settings(BaseSettings):
     firestore_usage_collection: str = "studio_usage"
     firestore_memory_collection: str = "studio_agent_memory"
     google_cloud_project: str = ""
+    # Private bucket for slide frames, audio and the finished MP4.
+    # Empty locally (files stay in workspace/). On Cloud Run set this so a
+    # restart can still serve the slides. See app/blob_store.py.
+    gcs_bucket: str = ""
     # Where the admin cost report and the agent's memory live:
     #   auto       Firestore when connected (always on Cloud Run), else SQLite on disk
     #   sqlite     always the local SQLite file

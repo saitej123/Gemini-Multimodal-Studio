@@ -52,12 +52,12 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --execution-environment gen2 \
-            --memory 4Gi \
-            --cpu 2 \
+            --memory 8Gi \
+            --cpu 4 \
             --timeout 3600 \
             --cpu-boost \
-            --concurrency 1 \
-            --max-instances 1 \
+            --concurrency 100 \
+            --max-instances 5 \
             --update-env-vars "HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,DEMO_PUBLIC=true" \
             --set-secrets "GEMINI_API_KEY=gemini-api-key:latest,AUTH_ADMIN_PASSWORD=auth-admin-password:latest"
 

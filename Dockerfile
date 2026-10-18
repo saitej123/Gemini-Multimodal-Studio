@@ -36,7 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip \
+    && pip install "loguru>=0.7.2" \
+    && pip install -r requirements.txt \
+    && python -c "import loguru, fastapi"
 
 COPY app/ app/
 COPY frontend/ frontend/

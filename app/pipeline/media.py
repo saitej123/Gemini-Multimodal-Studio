@@ -143,6 +143,7 @@ def synthesize_many(
     items: list[tuple[str, Path]],
     voice: str | None = None,
     workers: int = 3,
+    on_done=None,
 ) -> list[str]:
     """Synthesize ``(text, out_path)`` clips in parallel (staggered starts).
 
@@ -163,8 +164,19 @@ def synthesize_many(
 
     _one = costs.bind_context(_one_raw)  # keep the job id on worker threads
 
+    def _mark(i: int) -> None:
+        if on_done:
+            try:
+                on_done(i + 1, len(items))
+            except Exception:
+                pass
+
     if workers == 1:
-        return [_one(it) for it in items]
+        out = []
+        for i, it in enumerate(items):
+            out.append(_one(it))
+            _mark(i)
+        return out
     results: list = [None] * len(items)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = []
@@ -176,6 +188,8 @@ def synthesize_many(
                 results[i] = f.result()
             except Exception as e:  # noqa: BLE001
                 results[i] = e
+            else:
+                _mark(i)
     for r in results:
         if isinstance(r, Exception):
             raise r
@@ -186,6 +200,7 @@ def synthesize_slide_audio(
     narrations: list[str],
     audio_dir: Path,
     voice: str | None = None,
+    on_done=None,
 ) -> tuple[list[Path], str]:
     """Synthesize one Gemini clip per slide in parallel. Returns (paths, engine)."""
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -195,6 +210,7 @@ def synthesize_slide_audio(
         [(t or "...", o) for t, o in zip(narrations, outs)],
         voice=voice,
         workers=get_settings().effective_llm_parallel(),
+        on_done=on_done,
     )
     paths = [o if o.exists() else o.with_suffix(".wav") for o in outs]
     return paths, (engines[-1] if engines else "none")
@@ -224,14 +240,55 @@ def _split_indices(count: int, n_workers: int) -> list[list[int]]:
     return [b for b in batches if b]
 
 
+def _capture_timeout_s(manifest_path: Path) -> int:
+    """Hard stop so a hung browser becomes an error instead of a stuck stage.
+
+    Sized from the screenshot count, then capped under the Cloud Run request
+    limit so the stage can report the failure before the instance is killed.
+    """
+    try:
+        cfg = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 600
+    indices = cfg.get("slide_indices") or list(range(int(cfg.get("count") or 1)))
+    n = max(1, len(indices))
+    if cfg.get("mode") == "animated":
+        frames = cfg.get("capture_indices_per_slide") or []
+        shots = 0
+        for i in indices:
+            if isinstance(frames, list) and i < len(frames) and isinstance(frames[i], list):
+                shots += max(1, len(frames[i]))
+            else:
+                shots += 24
+        # ~6s per screenshot plus browser startup, never past 45 minutes.
+        return max(180, min(2700, 90 + shots * 6))
+    return max(180, min(1800, 90 + n * 45))
+
+
 def _run_capture_worker(manifest_path: Path) -> None:
     worker_cmd = [
         sys.executable, "-m", "app.pipeline.capture_worker",
         "--manifest", str(manifest_path),
     ]
-    proc = subprocess.run(worker_cmd, cwd=str(BASE_DIR), capture_output=True, text=True)
+    timeout = _capture_timeout_s(manifest_path)
+    proc = subprocess.Popen(
+        worker_cmd,
+        cwd=str(BASE_DIR),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise RuntimeError(
+            f"Capture timed out after {timeout // 60} min. "
+            "The browser did not finish filming. Use Re-capture to try again."
+        )
     if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()[-6:]
+        tail = (err or "").strip().splitlines()[-6:]
         raise RuntimeError("Capture failed: " + " | ".join(tail))
 
 

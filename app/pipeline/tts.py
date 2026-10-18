@@ -230,7 +230,21 @@ def _run_coroutine_safely(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
+_LIVE_TIMEOUT_S = 45.0
+
+
 async def _generate_live_async(client: Any, model: str, text: str, live_voice: str) -> tuple[bytes, int]:
+    """Generate expressive narration, and give up if the live socket stalls."""
+    try:
+        return await asyncio.wait_for(
+            _generate_live_inner(client, model, text, live_voice),
+            timeout=_LIVE_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError as e:
+        raise TimeoutError(f"{model} voice timed out after {int(_LIVE_TIMEOUT_S)}s") from e
+
+
+async def _generate_live_inner(client: Any, model: str, text: str, live_voice: str) -> tuple[bytes, int]:
     """Generate expressive human-like narration using Gemini 3.8 Live."""
     from google.genai import types
 
@@ -406,7 +420,8 @@ def synthesize(text: str, out_path: Path, voice: str | None = None) -> str:
                     break
                 except Exception as e:  # noqa: BLE001
                     last_exc = e
-                    if _model_missing(e):
+                    stalled = isinstance(e, TimeoutError) or "timed out" in str(e).lower()
+                    if _model_missing(e) or stalled:
                         log.bind(task="TTS").warning(
                             f"{model} unavailable ({e}); trying next Gemini voice model"
                         )

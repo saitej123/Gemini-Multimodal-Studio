@@ -130,6 +130,23 @@ def _build_doc(snapshot: dict) -> dict | None:
         if k not in {"agent_receipt", "work_dir"} and isinstance(v, (str, int, float, bool, type(None)))
     }
     content = snapshot.get("content") or {}
+    keep_content = {
+        k: content.get(k)
+        for k in (
+            "slides", "narration", "slide_title", "extracted_text",
+            "publish_title", "publish_description", "publish_tags",
+            "publish_meta_message", "audio_files", "doc_type",
+            "motion_fps", "full_slide_capture",
+        )
+        if k in content
+    }
+    if isinstance(keep_content.get("extracted_text"), str):
+        keep_content["extracted_text"] = keep_content["extracted_text"][:12000]
+    if isinstance(keep_content.get("narration"), str):
+        keep_content["narration"] = keep_content["narration"][:20000]
+    slides = keep_content.get("slides")
+    if isinstance(slides, list):
+        keep_content["slides"] = slides[:24]
     return {
         "id": job_id,
         "filename": snapshot.get("filename") or "",
@@ -140,10 +157,36 @@ def _build_doc(snapshot: dict) -> dict | None:
         "slide_count": len(content.get("slides") or []),
         "stages": _clean(snapshot.get("stages") or []),
         "artifacts": _clean(snapshot.get("artifacts") or {}),
+        "content": _clean(keep_content),
         "options": _clean(keep_opts),
         "created_at": snapshot.get("created_at"),
         "updated_at": time.time(),
     }
+
+
+def _shrink(doc: dict) -> dict:
+    """Drop the bulky fields if a snapshot would blow the 1 MB document cap."""
+    import json
+
+    try:
+        if len(json.dumps(doc, default=str)) < 800_000:
+            return doc
+    except Exception:
+        return doc
+    slim = dict(doc)
+    content = dict(slim.get("content") or {})
+    content.pop("extracted_text", None)
+    slides = []
+    for sl in (content.get("slides") or [])[:16]:
+        if isinstance(sl, dict):
+            slides.append({
+                "title": str(sl.get("title") or "")[:300],
+                "narration": str(sl.get("narration") or "")[:1500],
+                "layout": sl.get("layout") or "",
+            })
+    content["slides"] = slides
+    slim["content"] = content
+    return slim
 
 
 def _send(doc: dict) -> bool:
@@ -151,6 +194,7 @@ def _send(doc: dict) -> bool:
     client = _client()
     if client is None:
         return False
+    doc = _shrink(doc)
     try:
         client.collection(_collection_name()).document(doc["id"]).set(doc, merge=True)
         _SYNCED_COUNT += 1
@@ -219,18 +263,33 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
     """List recent jobs from Firestore."""
+    return load_snapshots(limit)
+
+
+def load_snapshots(limit: int = 80) -> list[dict[str, Any]]:
+    """Job documents for startup restore. Empty when Firestore is off."""
     if not enabled():
         return []
     client = _client()
     if client is None:
         return []
+    col = client.collection(_collection_name())
     try:
-        col = client.collection(_collection_name())
         query = col.order_by("updated_at", direction="DESCENDING").limit(limit)
-        return [doc.to_dict() for doc in query.stream()]
-    except Exception as e:
-        _LOG.warning(f"Failed to list jobs from Firestore: {e}")
-        return []
+        docs = list(query.stream())
+    except Exception as e:  # noqa: BLE001
+        _LOG.warning(f"Firestore job list fell back to an unordered read: {e}")
+        try:
+            docs = list(col.limit(limit).stream())
+        except Exception as e2:  # noqa: BLE001
+            _LOG.warning(f"Failed to list jobs from Firestore: {e2}")
+            return []
+    out: list[dict[str, Any]] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("id"):
+            out.append(data)
+    return out
 
 
 # --------------------------------------------------------- where data lives --

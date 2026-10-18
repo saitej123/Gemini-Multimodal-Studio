@@ -377,7 +377,8 @@ GPU thumbnail image: `docker compose --profile gpu up --build`
 | `GEMINI_MODEL` | Pinned to `gemini-3.8-flash` (or `gemini-4-argon`) |
 | `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | Expressive narration. Default `gemini-3.8-live` / `Kore` |
 | `FIRESTORE_ENABLED` | Use Firestore for job snapshots (`studio_jobs`). Always on in Cloud Run |
-| `GOOGLE_CLOUD_PROJECT` | Project for Firestore when running locally with `gcloud auth application-default login` |
+| `GOOGLE_CLOUD_PROJECT` | Firestore project. Set automatically on Cloud Run; locally needs `gcloud auth application-default login` |
+| `GCS_BUCKET` | Private bucket for slide images, audio and the MP4. Empty locally. Cloud Run uses `<project>-studio-media` |
 | `COST_STORE` / `MEMORY_STORE` | `auto` (default: Firestore when connected, else SQLite), `sqlite` or `firestore`. Cost events go to `studio_usage`, agent memory to `studio_agent_memory` |
 | `DEMO_PUBLIC` | `true` on the hosted link: no login screen (local default keeps sign-in) |
 | `YOUTUBE_CLIENT_SECRETS` | Path to OAuth client JSON for YouTube upload |
@@ -389,7 +390,8 @@ Social posting tokens live in `workspace/social_credentials.json` (admin UI), no
 
 | Data | Local run | Hosted (Cloud Run) |
 | --- | --- | --- |
-| Jobs and history | SQLite `workspace/sessions.db` | Firestore `studio_jobs` (container disk is wiped on restart) |
+| Jobs and history | SQLite `workspace/sessions.db` | Firestore `studio_jobs`, restored into memory on startup |
+| Slide images, audio, MP4 | `workspace/` on disk | Same disk while the instance is up, plus Cloud Storage `GCS_BUCKET` so a restart can still serve them |
 | Cost and usage events | SQLite `usage_events` | Firestore `studio_usage`, read back for the dashboard |
 | Agent long-term memory | SQLite `workspace/agent_memory.db` | Firestore `studio_agent_memory`, restored on start-up |
 

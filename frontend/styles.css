@@ -712,6 +712,13 @@ textarea.text-input.audience-prompt,
 .thumbs a { display: block; border: 1px solid hsl(var(--border)); border-radius: 10px; overflow: hidden; transition: transform .15s, box-shadow .15s; }
 .thumbs a:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,.12); }
 .thumbs img { display: block; width: 100%; height: auto; }
+.thumbs a.thumb-missing {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 92px; padding: 12px; text-align: center;
+  background: hsl(var(--muted, 220 14% 96%));
+  color: hsl(var(--muted-foreground, 220 9% 46%));
+  font-size: 12px; text-decoration: none;
+}
 /* Vertical formats: narrower, taller thumbs. */
 .thumbs.vertical { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
 .thumbs.vertical img { width: 100%; }

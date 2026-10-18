@@ -2476,7 +2476,14 @@ function renderPages(job) {
   pages.forEach((src) => {
     const a = document.createElement("a");
     a.href = bust(src); a.target = "_blank"; a.rel = "noopener";
-    a.innerHTML = `<img src="${bust(src)}" alt="slide" />`;
+    const img = document.createElement("img");
+    img.alt = "";
+    img.src = bust(src);
+    img.addEventListener("error", () => {
+      a.classList.add("thumb-missing");
+      a.textContent = "Preview unavailable";
+    });
+    a.appendChild(img);
     wrap.appendChild(a);
   });
   return false;

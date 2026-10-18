@@ -21,6 +21,19 @@ steps:
       - push
       - --all-tags
       - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio
+  # Best-effort. A missing permission here must not block the image deploy.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set +e
+        BUCKET="${PROJECT_ID}-studio-media"
+        gsutil ls -b "gs://$$BUCKET" >/dev/null 2>&1 || gsutil mb -l us-central1 "gs://$$BUCKET"
+        gcloud storage buckets add-iam-policy-binding "gs://$$BUCKET" \
+          --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+          --role="roles/storage.objectAdmin"
+        echo "storage bucket $$BUCKET ready (or skipped)"
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -36,9 +49,17 @@ steps:
       - --execution-environment=gen2
       - --timeout=3600
       - --cpu-boost
-      - --concurrency=1
+      # CPU stays on after the HTTP request returns, so voice and capture
+      # keep running on the background thread. Concurrency must be higher
+      # than 1: the progress stream is one long request, and slide images
+      # have to load beside it. 1 caused every <img> to 429.
+      - --no-cpu-throttling
+      - --concurrency=16
       - --max-instances=1
-      - --update-env-vars=HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,DEMO_PUBLIC=true
+      # Non-secret keys from .env.example. Secrets stay in Secret Manager
+      # (GEMINI_API_KEY, AUTH_ADMIN_PASSWORD). AUTH_* email/password and the
+      # paid search keys are not set here.
+      - --update-env-vars=HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_LITE_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,GEMINI_LIVE_VOICE=Aoede,GEMINI_IMAGE_MODEL=gemini-3-pro-image,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,FIRESTORE_COLLECTION=studio_jobs,FIRESTORE_USAGE_COLLECTION=studio_usage,FIRESTORE_MEMORY_COLLECTION=studio_agent_memory,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCS_BUCKET=$PROJECT_ID-studio-media,COST_STORE=auto,MEMORY_STORE=auto,TOPIC_RESEARCH_ENABLED=true,DEMO_PUBLIC=true
       - --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUTH_ADMIN_PASSWORD=auth-admin-password:latest
 images:
   - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:$BUILD_ID

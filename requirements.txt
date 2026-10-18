@@ -22,8 +22,8 @@ PyMuPDF
 # Local non-Gemini models are not used. httpx is still used for web research.
 google-genai
 
-# Structured logging
-loguru
+# Structured logging (pipeline stages import this at startup)
+loguru>=0.7.2
 
 # Narration is Gemini TTS (google-genai above). No local voice engines.
 
@@ -59,4 +59,5 @@ google-auth-httplib2
 
 # Firebase & Google Cloud Firestore integration
 google-cloud-firestore
+google-cloud-storage
 firebase-admin
