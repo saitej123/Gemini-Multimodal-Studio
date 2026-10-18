@@ -90,13 +90,10 @@ def fill_team(prs) -> None:
     tf = shape.text_frame
     # 0 Team Details (SemiBold 21), 2 name, 3 leader, 4 problem — all Google Sans Flex 18.
     tf.paragraphs[2].runs[0].text = "Team name: Multimodal Studio"
-    tf.paragraphs[3].runs[0].text = (
-        "Team leader: Anil Kumar  ·  anil8860556664@gmail.com"
-    )
+    tf.paragraphs[3].runs[0].text = "Team leader name: M Sai Teja"
     tf.paragraphs[4].runs[0].text = (
-        "Member: M Sai Teja  ·  macharlasaiteja@gmail.com.  "
-        "A chapter still becomes slides by hand, then a recording. "
-        "Students get a flat read-aloud. We wanted a video they would actually replay."
+        "Problem statement: A teacher still rebuilds a chapter as slides, then records it. "
+        "The voice and the picture do not move together, so students get a page read aloud."
     )
 
 
@@ -132,8 +129,7 @@ def steps(slide) -> None:
     write(
         slide,
         [
-            "Same path if you uploaded the file, or if the overnight job picked a paper.",
-            "Speaking is Gemini 3.8 Live, so the voice has pauses and a bit of warmth. It is not a flat read-out.",
+            "Upload a chapter, or let the queue pick a paper. Then one path to the video.",
         ],
         top=3.35,
         height=1.7,
@@ -150,14 +146,14 @@ def shots(slide) -> None:
         size=13,
     )
     pics = [
-        ("docs/screenshots/studio.png", "Where a run starts. File on the left, format and voice, then run."),
-        ("docs/screenshots/voices.png", "Kore is the voice in the demo. You can hear it before you commit."),
-        ("docs/screenshots/history.png", "Old runs stay here. Open one again instead of starting over."),
+        ("docs/screenshots/studio.png", "Studio. Drop the file and run."),
+        ("docs/screenshots/voices.png", "Pick a voice before you run."),
+        ("docs/screenshots/history.png", "Past runs stay here."),
     ]
-    x = 0.32
+    x = 0.4
     for img, cap in pics:
-        slide.shapes.add_picture(img, Inches(x), Inches(1.95), Inches(3.0), Inches(1.49))
-        write(slide, [cap], left=x, top=3.52, width=3.0, height=1.5, size=12)
+        slide.shapes.add_picture(img, Inches(x), Inches(2.05), Inches(2.9), Inches(1.44))
+        write(slide, [cap], left=x, top=3.58, width=2.9, height=0.9, size=12)
         x += 3.15
 
 
@@ -170,9 +166,9 @@ def main() -> None:
     write(
         brief,
         [
-            "Anil Kumar leads the team. M Sai Teja builds with him. We kept turning chapters into slides and then sitting down to record.",
-            "Multimodal Studio is for a teacher, a tutor, or a student who wants the idea to stick. Drop the PDF or the notes, say the age, and you get a video with a voice already on it.",
-            "The fun is in the timing. The highlight moves when the sentence does, so it feels like someone explaining, not a page being read out. Gemini writes it. Gemini 3.8 Live speaks it. The review link opens with no login.",
+            "M Sai Teja leads and built this.",
+            "You drop a chapter or a set of notes. You get a short video a class can replay. Gemini writes the slides. Gemini 3.8 Live speaks them.",
+            "The highlight moves with the sentence, so it feels like someone explaining, not a page being read out.",
         ],
     )
 
@@ -180,12 +176,12 @@ def main() -> None:
     write(
         opp,
         [
-            ("How it is different", SEMI, 14),
-            "Slide tools stop at the deck. Read-aloud tools stay in one tone and ignore the picture. A teacher was still doing the joining. This goes from the file to a video a class can replay.",
-            ("How it solves it", SEMI, 14),
-            "The slow part was the middle: slides a student can follow, a voice with some life in it, and a highlight that walks with the sentence. That middle is the product.",
-            ("What we would defend", SEMI, 14),
-            "One Gemini key. A voice that does not sound like a station announcement. A link anyone on the review team can open.",
+            ("Different from what exists", SEMI, 14),
+            "Slide tools stop at the deck. Read-aloud tools ignore the picture. Neither gives a class a video.",
+            ("How it solves the problem", SEMI, 14),
+            "One file goes in. A video comes out. The teacher does not record, and does not line the voice up by hand.",
+            ("USP", SEMI, 14),
+            "The voice and the highlight stay in time. That is the part a normal deck and a normal voiceover both miss.",
         ],
         top=2.32,
         height=3.05,
@@ -196,12 +192,9 @@ def main() -> None:
     write(
         feats,
         [
-            "A teacher can turn one chapter into a YouTube lesson, a Short, or a Reel. The length follows the format.",
-            "Age and how much the viewer already knows change the wording. A class of 16-year-olds does not get the same script as a beginner.",
-            "Gemini 3.8 Live speaks it. Kore is the demo voice. You can preview before you run.",
-            "A long PDF can be split into topics, then one video or a few, so a unit does not have to be one 40-minute file.",
-            "It flags a slide that repeats the one before it, and the on-screen highlight stays with the voice.",
-            "Title, description, and thumbnail come out with the file.",
+            "Drop a PDF. Get a video for YouTube or a Short.",
+            "Say the age. The wording changes for that class.",
+            "Gemini 3.8 Live speaks it, and the highlight follows the voice.",
         ],
         size=13,
     )
@@ -223,11 +216,8 @@ def main() -> None:
     write(
         wire,
         [
-            ("What you actually see", SEMI, 13),
-            "The file goes on the left.",
-            "Format and voice are next to it.",
-            "You press run and wait on the same page.",
-            "The MP4 plays there when it is done. History keeps the old ones.",
+            ("The Studio page", SEMI, 14),
+            "File on the left. Format and voice beside it. Run, then play the video on the same page.",
         ],
         left=6.65,
         top=1.5,
@@ -240,9 +230,9 @@ def main() -> None:
     write(
         arch,
         [
-            "Browser  →  our Python app on Cloud Run  →  Gemini  →  an MP4",
-            "The page is the Studio you saw. The server asks Gemini 3.8 Flash (or Argon) to read the file and write the slides. Gemini 3.8 Live speaks them. A headless Chrome photographs the slides. FFmpeg puts the sound on.",
-            "Each job is saved on the machine and copied to Firestore. Firebase Hosting only serves this pitch. The app itself is Cloud Run.",
+            "Studio page  →  Cloud Run  →  Gemini  →  MP4",
+            "Gemini 3.8 Flash reads the file and writes the slides. Gemini 3.8 Live speaks them. Chrome films the frames. FFmpeg joins the sound.",
+            "Each job is copied to Firestore. This pitch page is on Firebase Hosting.",
         ],
         size=14,
     )
@@ -251,11 +241,9 @@ def main() -> None:
     write(
         tech,
         [
-            "Writing, and reading pages: Gemini 3.8 Flash. Gemini 4 Argon when the source is dense and we want it to think harder.",
-            "Voice: Gemini 3.8 Live. Same family as the in-app assistant. We stopped using a separate flat text-to-speech voice.",
-            "Thumbnail only: Nano Banana. It does not draw the slides.",
-            "App: Python, FastAPI, HTML slides, headless Chrome, FFmpeg.",
-            "Hosting: Cloud Run. This page: Firebase Hosting. Job copy: Firestore.",
+            "Gemini 3.8 Flash writes the slides. Gemini 4 Argon is there when the chapter is dense.",
+            "Gemini 3.8 Live is the voice.",
+            "Cloud Run hosts the app. Firestore keeps each job. Firebase Hosting serves this pitch.",
         ],
         size=14,
     )
@@ -264,10 +252,8 @@ def main() -> None:
     write(
         cost,
         [
-            "No GPU. The only bill is the Gemini API.",
-            "On Flash, a normal video is a few rupees. Argon costs more, so we turn it on when the source needs it, not for every run.",
-            "Cloud Run and Firestore should stay inside the free tier for the number of people who will open this during review.",
-            "We have not switched on a paid hosting plan. The API key is the thing that has to be set.",
+            "No GPU. A normal video on Gemini Flash is a few rupees.",
+            "Cloud Run and Firestore stay in the free tier for review traffic.",
         ],
     )
 
@@ -278,10 +264,8 @@ def main() -> None:
     write(
         perf,
         [
-            "There is no benchmark table on purpose. We did not want a number on this slide that we had not measured.",
-            "Every run does write down how long each step took. That lives with the job, not in a slide we typed.",
-            "Filming is the slow step. We shoot the movement at the start of a slide and hold the frame, so a long voiceover is not a screenshot every fraction of a second.",
-            "If Gemini is busy, that step waits and tries again. The run does not stop in the middle and leave a broken file.",
+            "A chapter-length run finishes. Filming the slides is the slow step.",
+            "We have not published a benchmark table. Each job does record how long its own steps took.",
         ],
     )
 
@@ -289,10 +273,8 @@ def main() -> None:
     write(
         later,
         [
-            "Next we want the Studio to feel more obvious: fewer choices, a clearer next step, and the look of the slides kept in step with the style you picked.",
-            "Handwritten teaching templates, separate from the board we have now, so a maths or science idea can look drawn rather than typed.",
-            "Manim-style motion for formulas. Predefined YouTuber looks, plus a custom one. Better animation models, both the ones we ship and ones a teacher can add.",
-            "New animation skills you can drop in, the way a style is picked today. A Short cut from the long lesson without doing it by hand.",
+            "Next: handwritten teaching slides, and Manim-style motion when the chapter has a formula.",
+            "After that, a few YouTuber looks you can pick, or make your own.",
         ],
     )
 
@@ -302,9 +284,8 @@ def main() -> None:
     tf = shape.text_frame
     notes = [
         "GitHub: https://github.com/saitej123/Gemini-Multimodal-Studio",
-        "Demo video: 3 to 4 minutes of one real file becoming an MP4. Link still to be pasted.",
+        "Demo video: still to record (3 to 4 minutes, one real file).",
         "Product: https://multimodal-studio-469528918286.us-central1.run.app",
-        "That link opens in Studio. There is no login.",
     ]
     for text in notes:
         p = tf.add_paragraph()

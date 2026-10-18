@@ -28,8 +28,8 @@
 ## AI Builder Cup submission
 
 **Team:** Multimodal Studio  
-**Leader:** Anil Kumar · anil8860556664@gmail.com  
-**Member:** M Sai Teja · macharlasaiteja@gmail.com
+**Leader:** M Sai Teja (leads and built it)  
+**Member:** Anil Kumar
 
 **Pitch deck:** `Template/Out/Multimodal Studio - AI Builder Cup.pptx` (filled from the official template).
 
