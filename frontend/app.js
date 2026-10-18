@@ -67,23 +67,13 @@ let adminPreviewStyle = "whiteboard";
 const VISUAL_SEL_KEY = "mms_visual_preset";
 const DEFAULT_STUDIO_DURATION = 480;
 const DEFAULT_STUDIO_PRESET = "whiteboard:snow";
-// Featured order: keep teach classics (incl. whiteboard) near the top.
-const FEATURED_STYLE_ORDER = [
-  "auto", "whiteboard", "hybrid", "hybrid_kinetic", "hybrid_data", "hybrid_story",
-  "swiss_pulse", "velvet_std", "maximalist", "data_drift", "soft_signal",
-  "folk_freq", "shadow_cut", "deconstructed",
-  "kinetic_center", "lower_third", "promo_sprint", "caption_pop", "chart_race", "logo_intro",
-  "bento", "big_stat", "quote_pull", "timeline_rail", "split_media", "proof_duo", "kpi_strip", "stack_cards",
-  "geo_navy", "coral_split", "mosaic", "process", "wave_soft", "agenda", "rainbow_bar",
-  "gamma", "keynote", "slides", "explainer", "tutorial",
-  "notion", "pitch", "corporate", "saas", "cards", "modern", "minimal",
-  "glass", "editorial", "bold", "documentary", "teardown", "cinematic",
-  "neon", "blueprint", "playful", "terminal", "kinetic", "dataviz",
-  "device", "broadcast", "blush_soft", "circle_stack", "hex_grid",
+// The twelve real templates (design families). Same order the server sends them in:
+// teaching -> editorial -> business -> bold/story -> dev.
+const FAMILY_ORDER = [
+  "sketch", "notebook", "chalk", "split", "magazine", "band",
+  "glass", "bento", "poster", "pop", "cinema", "terminal",
 ];
-const STYLE_CATEGORY_KEYS = new Set([
-  "hybrid", "motion", "decks", "ppt", "modern_ppt", "hyper", "content", "teach", "story", "tech",
-]);
+const STYLE_CATEGORY_KEYS = new Set(FAMILY_ORDER);
 
 const FORMAT_ICONS = {
   youtube_video: "youtube",
@@ -556,19 +546,24 @@ function visualStyleFilterChips(activeFilter) {
   const cats = (styleCategories && styleCategories.length)
     ? styleCategories
     : [
-        { key: "teach", label: "Teach" },
-        { key: "motion", label: "Motion" },
-        { key: "hyper", label: "HyperFrames" },
-        { key: "decks", label: "Decks" },
-        { key: "story", label: "Story" },
-        { key: "data", label: "Data" },
-        { key: "systems", label: "Code" },
+        { key: "sketch", label: "Whiteboard" },
+        { key: "notebook", label: "Notebook" },
+        { key: "chalk", label: "Chalkboard" },
+        { key: "split", label: "Editorial" },
+        { key: "magazine", label: "Magazine" },
+        { key: "band", label: "Broadcast" },
+        { key: "glass", label: "Glass" },
+        { key: "bento", label: "Bento" },
+        { key: "poster", label: "Poster" },
+        { key: "pop", label: "Pop" },
+        { key: "cinema", label: "Cinema" },
+        { key: "terminal", label: "Terminal" },
       ];
   const chips = [
     { key: "featured", label: "Featured" },
     { key: "auto", label: "Auto only" },
     ...cats,
-    { key: "all", label: "All layouts" },
+    { key: "all", label: "All variants" },
   ];
   return chips.map((c) =>
     `<button type="button" class="vs-filter-chip${c.key === activeFilter ? " active" : ""}" data-vs-filter="${escapeHtml(c.key)}" role="tab" aria-selected="${c.key === activeFilter ? "true" : "false"}">${escapeHtml(c.label)}</button>`
@@ -602,10 +597,11 @@ function _uniqueLayouts(presets) {
     if (!byStyle.has(sk)) byStyle.set(sk, p);
   }
   const uniq = [...byStyle.values()];
+  // Auto first, then by template family; each family's flagship leads its group.
   const rank = (p) => {
-    const sk = p.key === "auto" ? "auto" : (p.style || "");
-    const i = FEATURED_STYLE_ORDER.indexOf(sk);
-    return i >= 0 ? i : 200;
+    if (p.key === "auto") return -1;
+    const f = FAMILY_ORDER.indexOf(p.category);
+    return (f >= 0 ? f : 99) * 2 + (p.featured ? 0 : 1);
   };
   uniq.sort((a, b) => rank(a) - rank(b));
   return uniq;
@@ -625,18 +621,15 @@ function renderVisualColorStrip(swatchId, stripId) {
     return;
   }
   strip.hidden = false;
-  const themesForStyle = (visualPresets || []).filter((p) => p.style === styleKey);
-  // Fall back to global theme list if presets haven't loaded a cross-product yet.
-  const themes = themesForStyle.length
-    ? themesForStyle
-    : (videoThemes || []).filter((t) => t.key !== "auto").map((t) => ({
-        key: `${styleKey}:${t.key}`,
-        style: styleKey,
-        theme: t.key,
-        theme_label: t.label,
-        swatch: t.swatch || [],
-        dark: t.dark,
-      }));
+  // Every palette works with every template, so the strip lists them all.
+  const themes = (videoThemes || []).filter((t) => t.key !== "auto").map((t) => ({
+    key: `${styleKey}:${t.key}`,
+    style: styleKey,
+    theme: t.key,
+    theme_label: t.label,
+    swatch: t.swatch || [],
+    dark: t.dark,
+  }));
   const activeTheme = (selectedStyle === styleKey ? selectedTheme : adminPreviewTheme) || "";
   host.innerHTML = "";
   themes.forEach((p) => {
@@ -696,15 +689,8 @@ function filterVisualPresets(filter) {
     return list.filter((p) => p.key === "auto");
   }
   if (filter === "featured") {
-    // Curated shortlist (not every layout) + Auto — same on Studio and Admin.
-    const curatedKeys = new Set(
-      FEATURED_STYLE_ORDER.filter((k) => k && k !== "auto").slice(0, 32),
-    );
-    const featured = list.filter(
-      (p) => p.key === "auto"
-        || (p.featured && curatedKeys.has(p.style)),
-    );
-    return _uniqueLayouts(featured);
+    // One flagship per template (+ Auto): the twelve real looks at a glance.
+    return _uniqueLayouts(list.filter((p) => p.key === "auto" || p.featured));
   }
   if (filter === "all") {
     // All layouts (one card each) — colors picked via the strip.
@@ -735,16 +721,19 @@ function restoreVisualSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(VISUAL_SEL_KEY) || "null");
     if (!saved || !saved.preset) return;
-    if (!(visualPresets || []).some((p) => p.key === saved.preset)) return;
-    selectedPreset = saved.preset;
-    selectedStyle = saved.style || selectedStyle;
-    selectedTheme = saved.theme || selectedTheme;
+    const base = (visualPresets || []).find((p) => p.key === saved.preset)
+      || (visualPresets || []).find((p) => p.style === saved.style);
+    if (!base) return;
+    const themeOk = (videoThemes || []).some((t) => t.key === saved.theme);
+    selectedPreset = base.key === "auto" ? "auto" : `${base.style}:${themeOk ? saved.theme : base.theme}`;
+    selectedStyle = base.style || selectedStyle;
+    selectedTheme = base.key === "auto" ? "auto" : (themeOk ? saved.theme : base.theme);
     styleWasAuto = selectedStyle === "auto";
     themeWasAuto = selectedTheme === "auto";
     if (saved.filter) setVisualStyleFilter(saved.filter);
-    adminPreviewPreset = saved.preset;
-    adminPreviewStyle = saved.style || adminPreviewStyle;
-    adminPreviewTheme = saved.theme || adminPreviewTheme;
+    adminPreviewPreset = selectedPreset;
+    adminPreviewStyle = selectedStyle;
+    adminPreviewTheme = selectedTheme;
   } catch (e) { /* ignore */ }
 }
 
@@ -815,18 +804,20 @@ function updateVisualDesignHint() {
   if (!el) return;
   if (selectedPreset === "auto" || (styleWasAuto && themeWasAuto)) {
     const fmt = (selectedFormat || "").toLowerCase();
-    let hint = "Explainer · Midnight";
-    if (/(shorts|reels|tiktok|square)/.test(fmt)) hint = "Bold · Sunset";
-    else if (/linkedin/.test(fmt)) hint = "Modern · Aurora";
+    let hint = "Notebook · Midnight";
+    if (/(shorts|reels|tiktok|square)/.test(fmt)) hint = "Poster · Sunset";
+    else if (/linkedin/.test(fmt)) hint = "Broadcast · Aurora";
     el.textContent = `Auto · likely ${hint}`;
     return;
   }
-  const p = visualPresets.find((x) => x.key === selectedPreset);
+  const p = visualPresets.find((x) => x.key === selectedPreset)
+    || visualPresets.find((x) => x.style === selectedStyle);
   if (p) {
     const layout = p.style_label || p.label || selectedStyle;
     const font = p.font_label ? ` · ${p.font_label}` : "";
-    const theme = p.theme_label ? ` · ${p.theme_label}` : "";
-    el.textContent = `${layout}${font}${theme}`;
+    const tObj = (videoThemes || []).find((t) => t.key === selectedTheme);
+    const themeLabel = (tObj && tObj.label) || p.theme_label || "";
+    el.textContent = `${layout}${font}${themeLabel ? ` · ${themeLabel}` : ""}`;
     return;
   }
   el.textContent = `${selectedStyle} · ${selectedTheme}`;
@@ -903,34 +894,34 @@ const STYLE_ICONS = {
   proof_duo: "scale", kpi_strip: "gauge", stack_cards: "layers",
 };
 
-/** Shared Studio + Admin layout card — preview + font + variety (not color-only). */
+/** Tiny schematic of a template family, painted in the preset's own palette. */
+function familyMiniHtml(p) {
+  const fam = p.key === "auto" ? "auto" : (p.category || "bento");
+  const c = p.colors || {};
+  const vars = `--m-bg:${c.bg || "#0a0a0c"};--m-ink:${c.ink || "#f4f4f5"};--m-a:${c.accent || "#6366f1"}`;
+  return `<span class="fam-mini" data-fam="${escapeHtml(fam)}" style="${escapeHtml(vars)}" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>`;
+}
+
+/** Shared Studio + Admin card: schematic, name, real font pair, template. */
 function visualLayoutCardHtml(p, opts) {
-  if (typeof window.__layoutCardHtml === "function") return window.__layoutCardHtml(p, opts || {});
   const { admin = false } = opts || {};
   const sk = p.key === "auto" ? "auto" : (p.style || "explainer");
-  const icon = STYLE_ICONS[sk] || "type";
-  const previewCls = "style-preview style-preview-" + (sk === "auto" ? "modern" : sk);
+  const icon = STYLE_ICONS[sk] || "layout-template";
   const sw = (p.swatch || []).slice(0, 3).map((c) =>
     `<i class="vp-dot" style="background:${escapeHtml(c)}"></i>`
   ).join("");
   const styleName = p.style_label || p.label || sk;
   const fontName = p.font_label || "";
-  const variety = p.template || p.variety || "";
+  const fontStyle = p.font_stack ? ` style="font-family:${escapeHtml(p.font_stack)}"` : "";
   const themeName = p.key === "auto" ? "Smart match" : (p.theme_label || "");
   const cat = p.category_label || "";
   return (
-    `<span class="${previewCls}" aria-hidden="true">` +
-      `<span class="sp-line sp-title"></span>` +
-      `<span class="sp-line sp-body"></span>` +
-      `<span class="sp-line sp-body short"></span>` +
-    `</span>` +
+    familyMiniHtml(p) +
     `<span class="vp-swatch">${sw}</span>` +
     `<span class="vp-label">${admin ? `<i data-lucide="${icon}"></i>` : ""}${escapeHtml(styleName)}</span>` +
-    (fontName ? `<span class="vp-font">Aa · ${escapeHtml(fontName)}</span>` : "") +
-    (themeName ? `<span class="vp-theme">${escapeHtml(themeName)}</span>` : "") +
-    (cat && p.key !== "auto" ? `<span class="vp-cat">${escapeHtml(cat)}</span>` : "") +
-    (variety ? `<span class="vp-variety">${escapeHtml(variety)}</span>` : "") +
-    (p.example ? `<span class="vp-example">${escapeHtml(p.example)}</span>` : "")
+    (cat && p.key !== "auto" ? `<span class="vp-cat">${escapeHtml(cat)} template</span>` : "") +
+    (fontName ? `<span class="vp-font"${fontStyle}>Aa · ${escapeHtml(fontName)}</span>` : "") +
+    (themeName ? `<span class="vp-theme">${escapeHtml(themeName)}</span>` : "")
   );
 }
 
@@ -1017,14 +1008,14 @@ function updateAutoStyleHint() {
   const descEl = $("style-desc");
   if (selectedStyle !== "auto") return;
   const fmt = (selectedFormat || "").toLowerCase();
-  let hint = "Explainer";
-  if (/(shorts|reels|tiktok|square)/.test(fmt)) hint = "Bold";
-  else if (/linkedin/.test(fmt)) hint = "Modern";
+  let hint = "Notebook";
+  if (/(shorts|reels|tiktok|square)/.test(fmt)) hint = "Poster";
+  else if (/linkedin/.test(fmt)) hint = "Broadcast";
   if (nameEl) nameEl.textContent = `Auto · likely ${hint}`;
   if (descEl) {
     descEl.textContent =
       `Picks after reading your document (type, topic cues, format). ` +
-      `Current format leans ${hint}; papers → Documentary, how-tos → Tutorial, architecture → Teardown.`;
+      `Current format leans ${hint}; papers → Editorial, how-tos → Notebook, step-by-step → Whiteboard, code → Terminal, stories → Cinema, shorts → Pop.`;
   }
 }
 
@@ -1056,1258 +1047,67 @@ function applyResolvedStyleFromJob(job) {
 /* ---- Admin Visual styles (sample slide carousel) ---- */
 let adminSlideIdx = 0;
 
-/** Per-style slide kits — full templates with denser copy, visuals, and motion. */
-const STYLE_PREVIEW_KITS = {
-  modern: [
-    { key: "cover", label: "Title card", html: () => `
-      <div class="vs-lower-third vs-a-in">EP 12 · PRODUCT · 16:9</div>
-      <div class="vs-card-panel vs-a-up">
-        <div class="vs-kicker">Modern template</div>
-        <div class="vs-title">Clean cards. Soft depth. Clear hierarchy.</div>
-        <p class="vs-body">Balanced default for tech demos — rounded panels, soft shadows, and a calm sans that stays readable at 1080p.</p>
-        <div class="vs-chip-row">
-          <span class="vs-chip vs-a-stagger">Title</span>
-          <span class="vs-chip vs-a-stagger">Bullets</span>
-          <span class="vs-chip vs-a-stagger">Diagram</span>
-          <span class="vs-chip vs-a-stagger">CTA</span>
-        </div>
-      </div>
-      <div class="vs-progress vs-a-grow"><i style="--p:62%"></i><span>Slide 1 of arc</span></div>` },
-    { key: "bullets", label: "Idea cards", html: () => `
-      <div class="vs-kicker vs-a-in">Key ideas</div>
-      <div class="vs-title vs-a-up">Three things that matter on screen</div>
-      <p class="vs-body vs-a-fade">Keep each card to one verb and one outcome — the narration carries the rest.</p>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Hook fast</strong><span>Open with a number or tension in the first 3 seconds.</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>One idea</strong><span>Never crowd a slide — one claim, one visual.</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>03</b><strong>Land the beat</strong><span>Close with a takeaway chip the viewer can remember.</span></div>
-      </div>` },
-    { key: "compare", label: "Problem / fix", html: () => `
-      <div class="vs-split">
-        <div class="vs-split-a vs-a-left">
-          <div class="vs-kicker">Problem</div>
-          <div class="vs-title sm">Visual noise</div>
-          <p class="vs-body">Crowded slides force the eye to hunt. Retention drops before the idea lands.</p>
-          <ul class="vs-mini-list"><li>Too many bullets</li><li>Competing accents</li><li>No breathing room</li></ul>
-        </div>
-        <div class="vs-split-b vs-a-right">
-          <div class="vs-kicker">Fix</div>
-          <div class="vs-title sm">Modern space</div>
-          <p class="vs-body">Rounded cards + soft depth create hierarchy without shouting.</p>
-          <ul class="vs-mini-list"><li>One accent color</li><li>Card grouping</li><li>Clear CTA</li></ul>
-        </div>
-      </div>` },
-    { key: "flow", label: "Story arc", html: () => `
-      <div class="vs-kicker vs-a-in">Story arc</div>
-      <div class="vs-title vs-a-up">Hook → teach → prove → close</div>
-      <div class="vs-timeline vs-a-fade">
-        <div class="vs-tl-item on"><b>1</b><span>Hook</span><small>Number / tension</small></div>
-        <div class="vs-tl-item on"><b>2</b><span>Teach</span><small>Define terms</small></div>
-        <div class="vs-tl-item"><b>3</b><span>Prove</span><small>Compare / flow</small></div>
-        <div class="vs-tl-item"><b>4</b><span>Close</span><small>Takeaway CTA</small></div>
-      </div>
-      <p class="vs-body">Modern is the safe default when the content — not the skin — should lead.</p>` },
-    { key: "diagram", label: "System map", html: () => `
-      <div class="vs-kicker">Diagram</div>
-      <div class="vs-title sm">How pieces connect</div>
-      <div class="vs-sysmap">
-        <div class="vs-node vs-a-pop">Input</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node accent vs-a-pop">Core</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node vs-a-pop">Output</div>
-      </div>
-      <div class="vs-chip-row"><span class="vs-chip">API</span><span class="vs-chip">Model</span><span class="vs-chip">UI</span></div>` },
-    { key: "verdict", label: "Takeaway", html: () => `
-      <div class="vs-card-panel center vs-a-up">
-        <div class="vs-kicker">Takeaway</div>
-        <div class="vs-title">Use Modern when you want polish without drama.</div>
-        <p class="vs-body">Ideal for product demos, weekly digests, and any video where clarity beats spectacle.</p>
-        <div class="vs-cta-pill vs-a-pulse">Watch next →</div>
-      </div>` },
-  ],
-  minimal: [
-    { key: "cover", label: "Quiet open", html: () => `
-      <div class="vs-min-cover vs-a-fade">
-        <div class="vs-title">Less ink.</div>
-        <div class="vs-sub">More thinking.</div>
-        <p class="vs-body" style="margin-top:18px;max-width:28ch">Whitespace is the design. Every line must earn its place.</p>
-      </div>` },
-    { key: "bullets", label: "Sparse list", html: () => `
-      <div class="vs-min-list vs-a-up">
-        <div class="vs-title sm">What stays on screen</div>
-        <p><strong>One claim</strong> — the sentence that matters</p>
-        <p><strong>One proof</strong> — a fact, not a lecture</p>
-        <p><strong>One close</strong> — leave silence after it</p>
-      </div>` },
-    { key: "compare", label: "Hairline", html: () => `
-      <div class="vs-min-rule vs-a-fade">
-        <div><span class="vs-kicker">Before</span><div class="vs-title sm">Dense</div><p class="vs-body">Everything fights for attention.</p></div>
-        <hr/>
-        <div><span class="vs-kicker">After</span><div class="vs-title sm">Air</div><p class="vs-body">The idea finally has room.</p></div>
-      </div>` },
-    { key: "quote", label: "Single line", html: () => `
-      <div class="vs-min-cover vs-a-up">
-        <div class="vs-title sm">“If it doesn’t earn the pixel, cut it.”</div>
-        <div class="vs-sub" style="margin-top:14px">— Minimal style rule</div>
-      </div>` },
-    { key: "flow", label: "Path", html: () => `
-      <div class="vs-min-flow vs-a-draw"><span>Start</span><span class="vs-dot"></span><span>Middle</span><span class="vs-dot"></span><span>End</span></div>
-      <p class="vs-body" style="margin-top:20px;text-align:center">Three beats. No ornament.</p>` },
-    { key: "verdict", label: "Close", html: () => `
-      <div class="vs-min-cover vs-a-fade">
-        <div class="vs-title sm">Prefer Minimal for research summaries and whitepapers.</div>
-      </div>` },
-  ],
-  editorial: [
-    { key: "cover", label: "Magazine cover", html: () => `
-      <div class="vs-ed-cover vs-a-up">
-        <div class="vs-ed-kicker">ESSAY · VOL. 04 · LONGFORM</div>
-        <div class="vs-title">The quiet power of restraint</div>
-        <p class="vs-body" style="max-width:36ch;margin-top:12px">A visual essay for AI explainers that want magazine pacing — serif titles, pull-quotes, and chapter breath.</p>
-        <div class="vs-ed-by">Narration may wander. On-screen text stays sparse.</div>
-      </div>` },
-    { key: "pull", label: "Pull quote", html: () => `
-      <div class="vs-ed-cols">
-        <blockquote class="vs-ed-pull vs-a-left">“Type is the voice of the piece.”</blockquote>
-        <div class="vs-a-right">
-          <div class="vs-kicker">Scene</div>
-          <p class="vs-body">Serif headlines. Generous tracking. The eye reads like a spread, not a dashboard.</p>
-          <p class="vs-body">Use for essays, paper walkthroughs, and opinionated tech writing.</p>
-        </div>
-      </div>` },
-    { key: "spread", label: "Two-page", html: () => `
-      <div class="vs-ed-spread">
-        <div class="vs-ed-page vs-a-left"><span>01 · SETUP</span><p>Establish the thesis with a quiet cover and one framing question.</p><small>Keep body under 40 words.</small></div>
-        <div class="vs-ed-page vs-a-right"><span>02 · TURN</span><p>Counterpoint lands. Evidence appears. The reader leans in.</p><small>Then resolve with one elegant line.</small></div>
-      </div>` },
-    { key: "chapter", label: "Chapter", html: () => `
-      <div class="vs-ed-chapter vs-a-up">
-        <div class="vs-ed-num">III</div>
-        <div>
-          <div class="vs-kicker">Chapter</div>
-          <div class="vs-title sm">The turn</div>
-          <p class="vs-body">Where the story flips — doubt, then clarity — before the closing page.</p>
-        </div>
-      </div>` },
-    { key: "timeline", label: "Timeline", html: () => `
-      <div class="vs-kicker">History of an idea</div>
-      <div class="vs-ed-timeline">
-        <div class="vs-a-stagger"><b>2017</b><span>Attention paper lands</span></div>
-        <div class="vs-a-stagger"><b>2020</b><span>Scale becomes destiny</span></div>
-        <div class="vs-a-stagger"><b>2024</b><span>Agents enter the chat</span></div>
-        <div class="vs-a-stagger"><b>Now</b><span>What we still get wrong</span></div>
-      </div>` },
-    { key: "verdict", label: "Colophon", html: () => `
-      <div class="vs-ed-cover vs-a-fade">
-        <div class="vs-ed-kicker">CLOSE</div>
-        <div class="vs-title sm">Leave them with one elegant line.</div>
-        <p class="vs-body">Editorial wins when the script is literary and the visuals stay typographic.</p>
-      </div>` },
-  ],
-  bold: [
-    { key: "cover", label: "Huge hook", html: () => `
-      <div class="vs-bold-hero">
-        <div class="vs-stat mega vs-a-pop">10×</div>
-        <div class="vs-title vs-a-up">FASTER. LOUDER. CLEARER.</div>
-        <p class="vs-body vs-a-fade">High-impact social cuts — giant numbers, short sentences, almost no dense text.</p>
-        <div class="vs-lower-third vs-a-in">HOOK · 0:00–0:03</div>
-      </div>` },
-    { key: "punch", label: "Punch list", html: () => `
-      <div class="vs-bold-list">
-        <div class="vs-a-stagger"><span>01</span> DROP THE NUMBER</div>
-        <div class="vs-a-stagger"><span>02</span> PUNCH THE LINE</div>
-        <div class="vs-a-stagger"><span>03</span> HARD CTA</div>
-      </div>
-      <p class="vs-body" style="margin-top:14px">If a word doesn’t hit, delete it.</p>` },
-    { key: "bars", label: "Impact bars", html: () => `
-      <div class="vs-kicker">Before / after</div>
-      <div class="vs-title sm">Make the gap feel physical</div>
-      <div class="vs-bold-bars">
-        <div class="vs-bold-bar vs-a-bar" style="--w:35%"><span>OLD WAY</span></div>
-        <div class="vs-bold-bar hot vs-a-bar" style="--w:95%"><span>NEW WAY</span></div>
-      </div>` },
-    { key: "statgrid", label: "Stat grid", html: () => `
-      <div class="vs-stat-grid">
-        <div class="vs-a-pop"><b>92%</b><span>retention lift</span></div>
-        <div class="vs-a-pop"><b>3s</b><span>to first hook</span></div>
-        <div class="vs-a-pop"><b>0</b><span>wasted words</span></div>
-      </div>` },
-    { key: "flow", label: "Beat sheet", html: () => `
-      <div class="vs-bold-hero vs-a-up">
-        <div class="vs-title">HOOK → HIT → CTA</div>
-        <div class="vs-sub">Maximum visual weight. Minimum reading.</div>
-      </div>` },
-    { key: "verdict", label: "CTA", html: () => `
-      <div class="vs-bold-cta vs-a-pulse">DO THIS NEXT</div>
-      <p class="vs-body" style="text-align:center;margin-top:12px">Bold is for hooks, launches, and clips that must stop the scroll.</p>` },
-  ],
-  explainer: [
-    { key: "cover", label: "Hook number", html: () => `
-      <div class="vs-exp-hook">
-        <div class="vs-lower-third vs-a-in">SYSTEM DESIGN · EXPLAINER</div>
-        <div class="vs-stat vs-a-pop">10×</div>
-        <div class="vs-title vs-a-up">Why transformers still win at scale</div>
-        <p class="vs-body vs-a-fade">Tech YouTube pacing — kinetic numbers, compare bars, and a mechanism you can point at.</p>
-      </div>` },
-    { key: "define", label: "Define", html: () => `
-      <div class="vs-kicker vs-a-in">Define</div>
-      <div class="vs-title vs-a-up">What is attention?</div>
-      <ul class="vs-bullets">
-        <li class="vs-a-stagger"><strong>Look everywhere</strong> — every token can attend to every other token</li>
-        <li class="vs-a-stagger"><strong>Learn weights</strong> — the model discovers which links matter</li>
-        <li class="vs-a-stagger"><strong>Go parallel</strong> — no sequential bottleneck like RNNs</li>
-      </ul>
-      <div class="vs-callout vs-a-fade">Viewer should be able to repeat this definition out loud.</div>` },
-    { key: "compare", label: "Compare", html: () => `
-      <div class="vs-kicker">Compare</div>
-      <div class="vs-title">RNN vs Transformer</div>
-      <div class="vs-compare">
-        <div class="vs-col vs-a-left">
-          <div class="vs-col-h">Before</div>
-          <div class="vs-bar vs-a-bar" style="--w:42%"></div>
-          <div class="vs-col-t">Sequential · slow to train · hard to scale</div>
-        </div>
-        <div class="vs-col vs-a-right">
-          <div class="vs-col-h">After</div>
-          <div class="vs-bar tall vs-a-bar" style="--w:92%"></div>
-          <div class="vs-col-t">Parallel · GPU-native · context grows</div>
-        </div>
-      </div>
-      <p class="vs-body">Animated bars beat a paragraph every time.</p>` },
-    { key: "flow", label: "Mechanism", html: () => `
-      <div class="vs-kicker">Mechanism</div>
-      <div class="vs-title">How a block runs</div>
-      <div class="vs-flow">
-        <span class="vs-a-stagger">Embed</span><i data-lucide="chevron-right"></i>
-        <span class="vs-a-stagger">Attend</span><i data-lucide="chevron-right"></i>
-        <span class="vs-a-stagger">FFN</span><i data-lucide="chevron-right"></i>
-        <span class="vs-a-stagger">Residual</span>
-      </div>
-      <p class="vs-body">Repeat N times → next-token logits. Point at each node while you narrate.</p>` },
-    { key: "catch", label: "Catch", html: () => `
-      <div class="vs-kicker">The catch</div>
-      <div class="vs-title sm">KV-cache cost at long context</div>
-      <div class="vs-infographic">
-        <div class="vs-ring vs-a-spin"><span>$$$</span></div>
-        <div>
-          <p class="vs-body">Memory grows with sequence length. Great for quality — expensive for serving.</p>
-          <div class="vs-chip-row"><span class="vs-chip">Trade-off</span><span class="vs-chip">When to use</span><span class="vs-chip">When not</span></div>
-        </div>
-      </div>` },
-    { key: "verdict", label: "Verdict", html: () => `
-      <div class="vs-quote vs-a-up">“Attention is all you need” still explains most of modern LLM architecture.</div>
-      <p class="vs-body">Explainer style = Vox/tech pacing: hook → define → compare → flow → catch → verdict.</p>
-      <div class="vs-cta-pill vs-a-pulse">Subscribe for the next teardown →</div>` },
-  ],
-  documentary: [
-    { key: "cover", label: "Cold open", html: () => `
-      <div class="vs-doc-scene vs-a-fade">
-        <div class="vs-doc-frame"></div>
-        <div class="vs-doc-caption vs-a-in">SCENE 01 · NIGHT · 2017</div>
-        <div class="vs-title">The night a paper changed everything</div>
-        <p class="vs-body">Documentary pacing — context, characters (ideas), evidence, resolution. Think Vox / Johnny Harris energy without the maps… yet.</p>
-      </div>` },
-    { key: "cast", label: "Cast", html: () => `
-      <div class="vs-kicker">Cast of ideas</div>
-      <div class="vs-title sm">Who is in this story?</div>
-      <div class="vs-doc-cast">
-        <div class="vs-doc-char vs-a-stagger"><b>Attention</b><span>The protagonist — sees everything at once</span></div>
-        <div class="vs-doc-char vs-a-stagger"><b>Memory</b><span>The constraint — context isn’t free</span></div>
-        <div class="vs-doc-char vs-a-stagger"><b>Scale</b><span>The antagonist — and the prize</span></div>
-      </div>` },
-    { key: "map", label: "Map beat", html: () => `
-      <div class="vs-doc-map vs-a-up">
-        <div class="vs-map-grid"></div>
-        <div class="vs-map-pin vs-a-pulse" style="--x:32%;--y:44%"><span>Lab</span></div>
-        <div class="vs-map-pin vs-a-pulse" style="--x:58%;--y:38%"><span>Industry</span></div>
-        <div class="vs-map-pin vs-a-pulse" style="--x:72%;--y:62%"><span>You</span></div>
-        <div class="vs-doc-caption">CALL OUT · where the idea traveled</div>
-      </div>` },
-    { key: "evidence", label: "Evidence", html: () => `
-      <div class="vs-doc-evidence vs-a-fade">
-        <div class="vs-kicker">Evidence trail</div>
-        <div class="vs-title sm">What the record shows</div>
-        <ol>
-          <li>Benchmarks moved within months of the paper</li>
-          <li>Industry rewrote roadmaps around attention</li>
-          <li>Trade-offs appeared later — cost, latency, safety</li>
-        </ol>
-      </div>` },
-    { key: "timeline", label: "Timeline", html: () => `
-      <div class="vs-doc-arc vs-a-draw">
-        <span>Setup</span><span>Stakes</span><span>Evidence</span><span>Reveal</span><span>Resolve</span>
-      </div>
-      <p class="vs-body" style="margin-top:16px">Lower thirds and chapter cards keep the viewer oriented without breaking immersion.</p>` },
-    { key: "verdict", label: "End card", html: () => `
-      <div class="vs-doc-scene vs-a-up">
-        <div class="vs-doc-caption">END CARD</div>
-        <div class="vs-title sm">What changed — and what to watch next.</div>
-        <p class="vs-body">Documentary style fits paper walkthroughs and “history of an idea” videos.</p>
-      </div>` },
-  ],
-  teardown: [
-    { key: "cover", label: "Promise", html: () => `
-      <div class="vs-td-hero">
-        <div class="vs-kicker vs-a-in">Product teardown</div>
-        <div class="vs-title vs-a-up">Open the box. Score the guts.</div>
-        <p class="vs-body">Surface → anatomy → internals → trade-offs → verdict. Honest architecture review energy.</p>
-        <div class="vs-td-score vs-a-pop">8.4</div>
-      </div>` },
-    { key: "anatomy", label: "Anatomy", html: () => `
-      <div class="vs-kicker">Anatomy</div>
-      <div class="vs-title sm">Peel the layers</div>
-      <div class="vs-td-layers">
-        <div class="vs-td-layer vs-a-stagger"><strong>Surface API</strong> — what users touch first</div>
-        <div class="vs-td-layer mid vs-a-stagger"><strong>Internals</strong> — how pieces actually connect</div>
-        <div class="vs-td-layer deep vs-a-stagger"><strong>Trade-offs</strong> — what you pay for the wins</div>
-      </div>` },
-    { key: "guts", label: "Guts", html: () => `
-      <div class="vs-kicker">Pipeline</div>
-      <div class="vs-td-pipe vs-a-draw"><span>In</span>→<span>Core</span>→<span>Out</span>→<span>Score</span></div>
-      <p class="vs-body">Name each hop. Viewers should be able to redraw this from memory.</p>` },
-    { key: "tradeoffs", label: "Trade-offs", html: () => `
-      <div class="vs-td-grid">
-        <div class="good vs-a-stagger"><b>+</b> Throughput at scale</div>
-        <div class="bad vs-a-stagger"><b>−</b> Latency tax on cold start</div>
-        <div class="good vs-a-stagger"><b>+</b> Developer experience</div>
-        <div class="bad vs-a-stagger"><b>−</b> Cost curve past 100k QPS</div>
-      </div>` },
-    { key: "score", label: "Scorecard", html: () => `
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>DX</b><i style="--p:88%"></i><span>8.8</span></div>
-        <div class="vs-a-pop"><b>Perf</b><i style="--p:76%"></i><span>7.6</span></div>
-        <div class="vs-a-pop"><b>Cost</b><i style="--p:54%"></i><span>5.4</span></div>
-        <div class="vs-a-pop"><b>Ops</b><i style="--p:71%"></i><span>7.1</span></div>
-      </div>` },
-    { key: "verdict", label: "Verdict", html: () => `
-      <div class="vs-td-hero vs-a-up">
-        <div class="vs-td-score">VERDICT</div>
-        <div class="vs-title sm">Use when you need an honest architecture review — not a hype reel.</div>
-      </div>` },
-  ],
-  tutorial: [
-    { key: "cover", label: "Goal", html: () => `
-      <div class="vs-tut-goal vs-a-up">
-        <div class="vs-kicker">You will learn</div>
-        <div class="vs-title">Ship a working RAG loop in one sitting</div>
-        <p class="vs-body">Do-this-now teaching — goals, steps, pitfalls, checklist. Coach energy, not lecture energy.</p>
-        <div class="vs-tut-check">☑ Goal · ☑ Setup · ☐ Steps · ☐ Checklist</div>
-      </div>` },
-    { key: "prereqs", label: "Prereqs", html: () => `
-      <div class="vs-kicker">Before you start</div>
-      <div class="vs-title sm">Grab these first</div>
-      <div class="vs-tut-prereq">
-        <span class="vs-a-stagger">Python 3.11+</span>
-        <span class="vs-a-stagger">API key</span>
-        <span class="vs-a-stagger">15 minutes</span>
-        <span class="vs-a-stagger">Terminal open</span>
-      </div>
-      <p class="vs-body">State prereqs early so nobody drops mid-tutorial.</p>` },
-    { key: "steps", label: "Steps", html: () => `
-      <div class="vs-tut-steps">
-        <div class="vs-a-stagger"><b>1</b>Install deps</div>
-        <div class="vs-a-stagger"><b>2</b>Index docs</div>
-        <div class="vs-a-stagger"><b>3</b>Query loop</div>
-        <div class="vs-a-stagger"><b>4</b>Evaluate hits</div>
-      </div>
-      <p class="vs-body" style="margin-top:12px">One major action per slide. Narration should sound like a patient coach.</p>` },
-    { key: "pitfall", label: "Do / don’t", html: () => `
-      <div class="vs-tut-dodont">
-        <div class="do vs-a-left"><div class="vs-kicker">Do</div><p>One action per slide</p><small>Show the command, then the result.</small></div>
-        <div class="dont vs-a-right"><div class="vs-kicker">Don’t</div><p>Skip the pitfall</p><small>Call out the failure mode out loud.</small></div>
-      </div>` },
-    { key: "checklist", label: "Checklist", html: () => `
-      <div class="vs-kicker">Ship checklist</div>
-      <div class="vs-tut-check-list">
-        <div class="vs-a-stagger">☐ Works locally on a fresh shell</div>
-        <div class="vs-a-stagger">☐ Handles empty retrieval hits</div>
-        <div class="vs-a-stagger">☐ Logs token cost per query</div>
-        <div class="vs-a-stagger">☐ Has a one-line README</div>
-      </div>` },
-    { key: "verdict", label: "Done", html: () => `
-      <div class="vs-tut-goal vs-a-pulse">
-        <div class="vs-title sm">You did it — now teach someone else.</div>
-        <p class="vs-body">Tutorial style shines for labs, how-tos, and “follow along” videos.</p>
-      </div>` },
-  ],
-  whiteboard: [
-    { key: "cover", label: "Blank board", html: () => `
-      <div class="vs-wb vs-a-fade">
-        <div class="vs-wb-title">Q: How does caching work?</div>
-        <p class="vs-body">Sketch-first teaching — diagrams grow while you talk. Text stays label-sized.</p>
-        <div class="vs-wb-sketch vs-a-draw">▢ → ◯ → ▢</div>
-        <div class="vs-wb-note">* draw live energy, even if it’s pre-built</div>
-      </div>` },
-    { key: "hub", label: "Hub", html: () => `
-      <div class="vs-wb">
-        <div class="vs-wb-hub vs-a-pop">Cache</div>
-        <div class="vs-wb-nodes">
-          <span class="vs-a-stagger">Hit</span>
-          <span class="vs-a-stagger">Miss</span>
-          <span class="vs-a-stagger">TTL</span>
-          <span class="vs-a-stagger">Evict</span>
-        </div>
-        <p class="vs-body" style="text-align:center;margin-top:12px">Place the core node, then grow connections.</p>
-      </div>` },
-    { key: "build", label: "Build", html: () => `
-      <div class="vs-wb vs-wb-build vs-a-draw">
-        <span class="box">1</span><span class="line"></span>
-        <span class="box">2</span><span class="line"></span>
-        <span class="box">3</span><span class="line"></span>
-        <span class="box">4</span>
-      </div>
-      <p class="vs-body" style="text-align:center;margin-top:14px">Progressive build — reveal one box at a time in the real video.</p>` },
-    { key: "annotate", label: "Annotate", html: () => `
-      <div class="vs-wb">
-        <div class="vs-wb-arrow vs-a-up">Client ⇢ Edge ⇢ Origin</div>
-        <div class="vs-wb-note vs-a-fade">* annotate constraints in the margins — latency, cost, consistency</div>
-        <ul class="vs-mini-list" style="margin-top:14px">
-          <li>What must be fresh?</li>
-          <li>What can be stale?</li>
-          <li>Who invalidates?</li>
-        </ul>
-      </div>` },
-    { key: "alt", label: "Alt design", html: () => `
-      <div class="vs-wb">
-        <div class="vs-title sm" style="color:#334155">Alternate design</div>
-        <div class="vs-split" style="margin-top:12px">
-          <div class="vs-split-a" style="background:#fff;border-color:#94a3b8;color:#334155"><div class="vs-kicker">Write-through</div><p class="vs-body">Simpler mental model</p></div>
-          <div class="vs-split-b" style="background:#fff;border-color:#94a3b8;color:#334155"><div class="vs-kicker">Write-back</div><p class="vs-body">Faster writes, harder ops</p></div>
-        </div>
-      </div>` },
-    { key: "verdict", label: "Recap", html: () => `
-      <div class="vs-wb vs-a-up">
-        <div class="vs-wb-title">Board recap → takeaways</div>
-        <div class="vs-wb-note">Sketch first. Polish later. Perfect for system-design interviews.</div>
-      </div>` },
-  ],
-  cinematic: [
-    { key: "cover", label: "Cold open", html: () => `
-      <div class="vs-cin">
-        <div class="vs-cin-letterbox vs-a-in"></div>
-        <div class="vs-stat mega soft vs-a-fade">3…</div>
-        <div class="vs-cin-title vs-a-up">Almost no text.</div>
-        <p class="vs-body" style="text-align:center;max-width:34ch">High-drama pacing — big visuals, short titles, emotional beats. Launch-film energy.</p>
-        <div class="vs-cin-letterbox vs-a-in"></div>
-      </div>` },
-    { key: "world", label: "World", html: () => `
-      <div class="vs-cin vs-a-fade">
-        <div class="vs-cin-title">Establish the world</div>
-        <div class="vs-sub">One line. One feeling. Then move.</div>
-        <p class="vs-body" style="text-align:center;max-width:36ch">Narration carries the story. On-screen text is a whisper, not a paragraph.</p>
-      </div>` },
-    { key: "tension", label: "Tension", html: () => `
-      <div class="vs-cin vs-cin-turn">
-        <div class="vs-cin-title vs-a-up">Rising tension</div>
-        <div class="vs-sub vs-a-fade">The problem gets personal.</div>
-        <div class="vs-cin-bars">
-          <i class="vs-a-bar" style="--w:30%"></i>
-          <i class="vs-a-bar" style="--w:55%"></i>
-          <i class="vs-a-bar" style="--w:80%"></i>
-        </div>
-      </div>` },
-    { key: "reveal", label: "Reveal", html: () => `
-      <div class="vs-cin vs-cin-turn">
-        <div class="vs-cin-title" style="opacity:.5">The turn</div>
-        <div class="vs-cin-flash vs-a-pop">REVEAL</div>
-        <p class="vs-body" style="text-align:center">One visual moment. Let it breathe.</p>
-      </div>` },
-    { key: "resolve", label: "Resolve", html: () => `
-      <div class="vs-cin vs-a-up">
-        <div class="vs-cin-title wide">From silence → impact</div>
-        <div class="vs-sub">Max 3 on-screen items. Ever.</div>
-      </div>` },
-    { key: "verdict", label: "Fade", html: () => `
-      <div class="vs-cin">
-        <div class="vs-cin-letterbox"></div>
-        <div class="vs-cin-title vs-a-fade">Fade on one emotional beat.</div>
-        <p class="vs-body" style="text-align:center">Cinematic fits launch films and vision pieces — not dense tutorials.</p>
-        <div class="vs-cin-letterbox"></div>
-      </div>` },
-  ],
-  hybrid: [
-    { key: "cover", label: "Bold hook", html: () => `
-      <div class="vs-lower-third vs-a-in">HYBRID · CONTENT FORMAT PACK</div>
-      <div class="vs-exp-hook">
-        <div class="vs-stat vs-a-pop">MIX</div>
-        <div class="vs-title vs-a-up">One video. Every content format.</div>
-        <p class="vs-body vs-a-fade">Hybrid maps source beats to layouts — hook, define, compare, teach, evidence, code, transform, close.</p>
-      </div>` },
-    { key: "define", label: "Explain", html: () => `
-      <div class="vs-kicker vs-a-in">Define · Explainer</div>
-      <div class="vs-title vs-a-up">What is the hybrid pack?</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Hook</strong><span>Bold / cinematic opener</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>Teach</strong><span>Explainer + tutorial beats</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>03</b><strong>Close</strong><span>Minimal / cinematic land</span></div>
-      </div>` },
-    { key: "hub", label: "Concept hub", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Hub</div>
-      <div class="vs-title sm vs-a-up">One center idea, many facets</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>●</b><strong>Core</strong><span>Named concept</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Part A</strong><span>Mechanism</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>Part B</strong><span>Trade-off</span></div>
-      </div>
-      <p class="vs-body" style="margin-top:10px">Use hub when the source defines a system with named pieces.</p>` },
-    { key: "compare", label: "Score", html: () => `
-      <div class="vs-kicker">Teardown beat</div>
-      <div class="vs-title sm">Trade-offs stay honest</div>
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>HOOK</b><i style="--p:90%"></i><span>9.0</span></div>
-        <div class="vs-a-pop"><b>TEACH</b><i style="--p:84%"></i><span>8.4</span></div>
-        <div class="vs-a-pop"><b>DEPTH</b><i style="--p:78%"></i><span>7.8</span></div>
-        <div class="vs-a-pop"><b>PACE</b><i style="--p:86%"></i><span>8.6</span></div>
-      </div>` },
-    { key: "bars", label: "Magnitude", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Bars</div>
-      <div class="vs-title sm vs-a-up">Show scale, not slogans</div>
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>COST</b><i style="--p:92%"></i><span>High</span></div>
-        <div class="vs-a-pop"><b>SPEED</b><i style="--p:55%"></i><span>Med</span></div>
-        <div class="vs-a-pop"><b>QUALITY</b><i style="--p:88%"></i><span>High</span></div>
-      </div>` },
-    { key: "steps", label: "Teach", html: () => `
-      <div class="vs-kicker">Tutorial beat</div>
-      <div class="vs-tut-steps">
-        <div class="vs-a-stagger"><b>1</b>Hook hard</div>
-        <div class="vs-a-stagger"><b>2</b>Define once</div>
-        <div class="vs-a-stagger"><b>3</b>Prove it</div>
-        <div class="vs-a-stagger"><b>4</b>Land clean</div>
-      </div>
-      <p class="vs-body" style="margin-top:12px">Vary layout every 1–2 slides — never stay in one skin.</p>` },
-    { key: "flow", label: "Pipeline", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Flow</div>
-      <div class="vs-title sm vs-a-up">Causal stages with arrows</div>
-      <div class="vs-sysmap">
-        <div class="vs-node vs-a-pop">Ingest</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node accent vs-a-pop">Reason</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node vs-a-pop">Render</div>
-      </div>
-      <p class="vs-body" style="margin-top:12px">Prefer flow when steps are sequential and linked.</p>` },
-    { key: "matrix", label: "Evidence", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Matrix</div>
-      <div class="vs-title sm vs-a-up">Parallel facts, one frame</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>A</b><strong>Claim</strong><span>What we assert</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>B</b><strong>Evidence</strong><span>What supports it</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>C</b><strong>Limit</strong><span>Where it fails</span></div>
-      </div>` },
-    { key: "panel", label: "Code panel", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Panel</div>
-      <div class="vs-card-panel vs-a-up">
-        <div class="vs-kicker">terminal · api</div>
-        <div class="vs-title sm">Show the config, not the lecture</div>
-        <p class="vs-body"><code style="opacity:.9">POST /v1/generate</code> · schema · flags · one-liners the viewer can copy.</p>
-        <div class="vs-chip-row">
-          <span class="vs-chip vs-a-stagger">CLI</span>
-          <span class="vs-chip vs-a-stagger">JSON</span>
-          <span class="vs-chip vs-a-stagger">Prompt</span>
-        </div>
-      </div>` },
-    { key: "transform", label: "Before → after", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Transform</div>
-      <div class="vs-split">
-        <div class="vs-card-panel vs-a-stagger"><div class="vs-kicker">From</div><div class="vs-title sm">Messy notes</div><p class="vs-body">Scattered claims, no structure.</p></div>
-        <div class="vs-card-panel vs-a-stagger"><div class="vs-kicker">To</div><div class="vs-title sm">Clean model</div><p class="vs-body">Named parts, clear flow.</p></div>
-      </div>` },
-    { key: "quote", label: "Insight", html: () => `
-      <div class="vs-kicker vs-a-in">Format · Quote</div>
-      <div class="vs-title vs-a-up" style="font-size:clamp(22px,3.2vw,36px);line-height:1.25">“One pivotal line beats five vague bullets.”</div>
-      <p class="vs-body vs-a-fade">Use quote when the source has a single insight worth lingering on.</p>` },
-    { key: "board", label: "Diagram", html: () => `
-      <div class="vs-wb vs-a-fade">
-        <div class="vs-wb-title">Whiteboard beat → connect the pieces</div>
-        <div class="vs-sysmap">
-          <div class="vs-node vs-a-pop">Hook</div>
-          <div class="vs-edge vs-a-draw"></div>
-          <div class="vs-node accent vs-a-pop">Core</div>
-          <div class="vs-edge vs-a-draw"></div>
-          <div class="vs-node vs-a-pop">Close</div>
-        </div>
-      </div>` },
-    { key: "verdict", label: "Close", html: () => `
-      <div class="vs-cin">
-        <div class="vs-cin-letterbox vs-a-in"></div>
-        <div class="vs-title vs-a-up">Hybrid when the lesson needs range.</div>
-        <p class="vs-body" style="text-align:center">Best default for long channel videos that teach and entertain.</p>
-        <div class="vs-cta-pill vs-a-pulse">Watch the arc →</div>
-        <div class="vs-cin-letterbox vs-a-in"></div>
-      </div>` },
-  ],
-  neon: [
-    { key: "cover", label: "Glow hook", html: () => `
-      <div class="vs-lower-third vs-a-in">NEON · GLASSMORPHISM</div>
-      <div class="vs-exp-hook">
-        <div class="vs-stat vs-a-pop vs-neon-glow">2049</div>
-        <div class="vs-title vs-a-up">The future looks like this.</div>
-        <p class="vs-body vs-a-fade">Glowing edges, gradient accents, night-mode energy — built for launches and hype.</p>
-      </div>` },
-    { key: "bullets", label: "Neon cards", html: () => `
-      <div class="vs-kicker vs-a-in">What glows</div>
-      <div class="vs-title vs-a-up">Three luminous ideas</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger vs-neon-card"><b>01</b><strong>Contrast</strong><span>Dark glass, bright accent</span></div>
-        <div class="vs-mini-card vs-a-stagger vs-neon-card"><b>02</b><strong>Gradient</strong><span>Indigo → cyan sweep</span></div>
-        <div class="vs-mini-card vs-a-stagger vs-neon-card"><b>03</b><strong>Glow</strong><span>Soft bloom on edges</span></div>
-      </div>` },
-    { key: "stat", label: "Gradient stat", html: () => `
-      <div class="vs-exp-hook">
-        <div class="vs-stat vs-a-pop vs-neon-glow">10×</div>
-        <div class="vs-title sm vs-a-up">One number, maximum bloom</div>
-        <p class="vs-body vs-a-fade">Let a single glowing figure carry the slide.</p>
-      </div>` },
-    { key: "flow", label: "Neon flow", html: () => `
-      <div class="vs-kicker vs-a-in">Method</div>
-      <div class="vs-sysmap">
-        <div class="vs-node vs-a-pop vs-neon-node">Spark</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node accent vs-a-pop vs-neon-node">Build</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node vs-a-pop vs-neon-node">Ship</div>
-      </div>` },
-    { key: "verdict", label: "CTA", html: () => `
-      <div class="vs-card-panel center vs-a-up vs-neon-card">
-        <div class="vs-kicker">Close</div>
-        <div class="vs-title vs-neon-glow">Turn the lights on.</div>
-        <div class="vs-cta-pill vs-a-pulse">Subscribe →</div>
-      </div>` },
-  ],
-  blueprint: [
-    { key: "cover", label: "Title block", html: () => `
-      <div class="vs-bp-titleblock vs-a-in">
-        <span>PROJECT</span><b>ATLAS-1</b><span>REV. 04</span>
-      </div>
-      <div class="vs-title vs-a-up">System schematic overview</div>
-      <p class="vs-body vs-a-fade">Grid paper, hairline drawings, engineering annotations — read like a spec sheet.</p>` },
-    { key: "diagram", label: "Schematic", html: () => `
-      <div class="vs-kicker">Schematic</div>
-      <div class="vs-sysmap vs-bp-map">
-        <div class="vs-node vs-a-pop">IN</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node accent vs-a-pop">CORE</div>
-        <div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node vs-a-pop">OUT</div>
-      </div>
-      <div class="vs-chip-row"><span class="vs-chip">A1</span><span class="vs-chip">B2</span><span class="vs-chip">C3</span></div>` },
-    { key: "callouts", label: "Callouts", html: () => `
-      <div class="vs-min-list vs-a-up">
-        <div class="vs-title sm">Parts list</div>
-        <p><strong>[1]</strong> Ingest — normalize inputs</p>
-        <p><strong>[2]</strong> Core — the reasoning unit</p>
-        <p><strong>[3]</strong> Output — render + verify</p>
-      </div>` },
-    { key: "compare", label: "Dimensions", html: () => `
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>LOAD</b><i style="--p:72%"></i><span>72%</span></div>
-        <div class="vs-a-pop"><b>TOL</b><i style="--p:40%"></i><span>±0.4</span></div>
-        <div class="vs-a-pop"><b>MASS</b><i style="--p:60%"></i><span>1.2kg</span></div>
-      </div>` },
-    { key: "verdict", label: "Sign-off", html: () => `
-      <div class="vs-bp-titleblock center vs-a-up">
-        <span>APPROVED</span><b>SHIP IT</b><span>QA ✓</span>
-      </div>
-      <p class="vs-body" style="text-align:center">Use Blueprint for architecture specs and system diagrams.</p>` },
-  ],
-  playful: [
-    { key: "cover", label: "Friendly hook", html: () => `
-      <div class="vs-play-cover vs-a-up">
-        <div class="vs-title">Let's make this easy!</div>
-        <p class="vs-body" style="max-width:30ch;margin-top:10px">Chunky shapes, bouncy accents, and plain language anyone can follow.</p>
-        <div class="vs-chip-row"><span class="vs-chip vs-play-chip vs-a-stagger">Fun</span><span class="vs-chip vs-play-chip vs-a-stagger">Clear</span><span class="vs-chip vs-play-chip vs-a-stagger">Kind</span></div>
-      </div>` },
-    { key: "bullets", label: "Sticker cards", html: () => `
-      <div class="vs-title vs-a-up">Three friendly ideas</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger vs-play-card"><b>😀</b><strong>Simple</strong><span>One idea per card</span></div>
-        <div class="vs-mini-card vs-a-stagger vs-play-card"><b>👍</b><strong>Warm</strong><span>Encouraging tone</span></div>
-        <div class="vs-mini-card vs-a-stagger vs-play-card"><b>✨</b><strong>Rounded</strong><span>Soft, chunky shapes</span></div>
-      </div>` },
-    { key: "steps", label: "Easy steps", html: () => `
-      <div class="vs-tut-steps vs-play-steps">
-        <div class="vs-a-stagger"><b>1</b>Start here</div>
-        <div class="vs-a-stagger"><b>2</b>Try it out</div>
-        <div class="vs-a-stagger"><b>3</b>You did it!</div>
-      </div>` },
-    { key: "compare", label: "This vs that", html: () => `
-      <div class="vs-split">
-        <div class="vs-split-a vs-a-left vs-play-card"><div class="vs-kicker">Before</div><div class="vs-title sm">Confusing</div><p class="vs-body">Too much jargon.</p></div>
-        <div class="vs-split-b vs-a-right vs-play-card"><div class="vs-kicker">After</div><div class="vs-title sm">Friendly</div><p class="vs-body">Plain and cheerful.</p></div>
-      </div>` },
-    { key: "verdict", label: "Cheerful close", html: () => `
-      <div class="vs-play-cover center vs-a-up">
-        <div class="vs-title sm">Great job — now go build!</div>
-        <div class="vs-cta-pill vs-a-pulse">More lessons →</div>
-      </div>` },
-  ],
-  terminal: [
-    { key: "cover", label: "Prompt", html: () => `
-      <div class="vs-term vs-a-in">
-        <div class="vs-term-bar"><i></i><i></i><i></i><span>~/project — zsh</span></div>
-        <div class="vs-term-body vs-a-fade">
-          <p><span class="vs-term-p">$</span> ./ship --goal "explain it"</p>
-          <p class="vs-term-c"># dev console · monospace · IDE feel</p>
-        </div>
-      </div>` },
-    { key: "panel", label: "Command", html: () => `
-      <div class="vs-term vs-a-up">
-        <div class="vs-term-bar"><i></i><i></i><i></i><span>build.sh</span></div>
-        <div class="vs-term-body">
-          <p><span class="vs-term-p">$</span> npm install</p>
-          <p><span class="vs-term-p">$</span> npm run build</p>
-          <p class="vs-term-ok">✓ built in 2.4s</p>
-        </div>
-      </div>` },
-    { key: "steps", label: "Output", html: () => `
-      <div class="vs-tut-steps vs-term-steps">
-        <div class="vs-a-stagger"><b>1</b>Run the command</div>
-        <div class="vs-a-stagger"><b>2</b>Read the output</div>
-        <div class="vs-a-stagger"><b>3</b>Fix &amp; repeat</div>
-      </div>` },
-    { key: "compare", label: "Diff", html: () => `
-      <div class="vs-term vs-a-up">
-        <div class="vs-term-bar"><i></i><i></i><i></i><span>diff</span></div>
-        <div class="vs-term-body">
-          <p class="vs-term-del">- const x = slow()</p>
-          <p class="vs-term-add">+ const x = fast()</p>
-        </div>
-      </div>` },
-    { key: "verdict", label: "Recap", html: () => `
-      <div class="vs-term center vs-a-up">
-        <div class="vs-term-body">
-          <p class="vs-term-c"># recap</p>
-          <p><span class="vs-term-p">$</span> git commit -m "done"</p>
-          <p class="vs-term-ok">✓ Terminal style — for coding tutorials &amp; CLI walkthroughs</p>
-        </div>
-      </div>` },
-  ],
-  hybrid_kinetic: [
-    { key: "cover", label: "Word slam", html: () => `
-      <div class="vs-exp-hook">
-        <div class="vs-stat vs-a-pop" style="font-size:3.2em;letter-spacing:-.06em">MOVE</div>
-        <div class="vs-title vs-a-up">Kinetic hybrid — words first.</div>
-        <p class="vs-body vs-a-fade">Remotion-style type beats inside a full teaching arc.</p>
-      </div>` },
-    { key: "define", label: "Define", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Slam</strong><span>One huge word</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>Teach</strong><span>Short cards</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>03</b><strong>Land</strong><span>Sparse close</span></div>
-      </div>` },
-    { key: "flow", label: "Type build", html: () => `
-      <div class="vs-sysmap">
-        <div class="vs-node vs-a-pop">Hook</div><div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node accent vs-a-pop">Teach</div><div class="vs-edge vs-a-draw"></div>
-        <div class="vs-node vs-a-pop">Cut</div>
-      </div>` },
-    { key: "verdict", label: "Close", html: () => `
-      <div class="vs-cin"><div class="vs-title vs-a-up">Say less. Move more.</div>
-      <div class="vs-cta-pill vs-a-pulse">Hybrid Kinetic →</div></div>` },
-  ],
-  hybrid_data: [
-    { key: "cover", label: "KPI hook", html: () => `
-      <div class="vs-exp-hook">
-        <div class="vs-stat vs-a-pop">98.4%</div>
-        <div class="vs-title vs-a-up">Hybrid Data — metrics lead.</div>
-        <p class="vs-body">Scorecards, bars, gauges, then the method.</p>
-      </div>` },
-    { key: "score", label: "Scorecard", html: () => `
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>P50</b><i style="--p:42%"></i><span>42ms</span></div>
-        <div class="vs-a-pop"><b>P99</b><i style="--p:78%"></i><span>180ms</span></div>
-        <div class="vs-a-pop"><b>OK</b><i style="--p:96%"></i><span>96%</span></div>
-      </div>` },
-    { key: "bars", label: "Bars", html: () => `
-      <div class="vs-bars">
-        <div class="vs-a-grow"><span>A</span><i style="--p:88%"></i></div>
-        <div class="vs-a-grow"><span>B</span><i style="--p:64%"></i></div>
-        <div class="vs-a-grow"><span>C</span><i style="--p:41%"></i></div>
-      </div>` },
-    { key: "verdict", label: "Verdict", html: () => `
-      <div class="vs-card-panel center vs-a-up"><div class="vs-title sm">Ship the number that matters.</div></div>` },
-  ],
-  hybrid_story: [
-    { key: "cover", label: "Scene", html: () => `
-      <div class="vs-lower-third vs-a-in">HYBRID STORY</div>
-      <div class="vs-title vs-a-up">Scene, stakes, then teach.</div>
-      <p class="vs-body vs-a-fade">Documentary pacing with explainer guts.</p>` },
-    { key: "stakes", label: "Stakes", html: () => `
-      <div class="vs-hub">
-        <div class="vs-hub-core vs-a-pop">Idea</div>
-        <div class="vs-hub-node vs-a-stagger">Why</div>
-        <div class="vs-hub-node vs-a-stagger">Who</div>
-        <div class="vs-hub-node vs-a-stagger">Cost</div>
-      </div>` },
-    { key: "teach", label: "Teach", html: () => `
-      <div class="vs-tut-steps">
-        <div class="vs-a-stagger"><b>1</b>Evidence</div>
-        <div class="vs-a-stagger"><b>2</b>Mechanism</div>
-        <div class="vs-a-stagger"><b>3</b>Trade-off</div>
-      </div>` },
-    { key: "verdict", label: "Land", html: () => `
-      <div class="vs-quote vs-a-up">“Leave them with one clear next thought.”</div>` },
-  ],
-  kinetic: [
-    { key: "cover", label: "Slam", html: () => `
-      <div class="vs-exp-hook"><div class="vs-stat vs-a-pop" style="font-size:3.4em">NOW</div>
-      <div class="vs-title vs-a-up">Kinetic type. Hard cuts.</div></div>` },
-    { key: "type", label: "Type", html: () => `
-      <div class="vs-title vs-a-up" style="font-size:1.6em">Build. the. line.</div>
-      <p class="vs-body vs-a-fade">Typewriter energy — one phrase at a time.</p>` },
-    { key: "stack", label: "Stack", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><strong>SHORT</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><strong>LOUD</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><strong>CLEAR</strong></div>
-      </div>` },
-    { key: "verdict", label: "Cut", html: () => `
-      <div class="vs-cta-pill vs-a-pulse">CUT TO CTA →</div>` },
-  ],
-  dataviz: [
-    { key: "cover", label: "KPI", html: () => `
-      <div class="vs-exp-hook"><div class="vs-stat vs-a-pop">3.2×</div>
-      <div class="vs-title vs-a-up">Data Viz — charts that teach.</div></div>` },
-    { key: "bars", label: "Bars", html: () => `
-      <div class="vs-bars">
-        <div class="vs-a-grow"><span>Base</span><i style="--p:40%"></i></div>
-        <div class="vs-a-grow"><span>Ours</span><i style="--p:92%"></i></div>
-      </div>` },
-    { key: "gauge", label: "Gauge", html: () => `
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>ACC</b><i style="--p:91%"></i><span>91%</span></div>
-        <div class="vs-a-pop"><b>LAT</b><i style="--p:55%"></i><span>55ms</span></div>
-      </div>` },
-    { key: "verdict", label: "Takeaway", html: () => `
-      <div class="vs-title sm vs-a-up">Caption the chart. Don't restate the paper.</div>` },
-  ],
-  device: [
-    { key: "cover", label: "Device hero", html: () => `
-      <div class="vs-device vs-a-up">
-        <div class="vs-device-bezel"><div class="vs-device-screen">
-          <div class="vs-kicker">APP</div><div class="vs-title sm">Feature, framed.</div>
-        </div></div>
-      </div>` },
-    { key: "zoom", label: "Feature zoom", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>UI</b><strong>Inbox</strong><span>Zero clutter</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>AI</b><strong>Assist</strong><span>One tap</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>SYNC</b><strong>Live</strong><span>Everywhere</span></div>
-      </div>` },
-    { key: "flow", label: "User flow", html: () => `
-      <div class="vs-tut-steps">
-        <div class="vs-a-stagger"><b>1</b>Open</div>
-        <div class="vs-a-stagger"><b>2</b>Act</div>
-        <div class="vs-a-stagger"><b>3</b>Done</div>
-      </div>` },
-    { key: "verdict", label: "CTA", html: () => `
-      <div class="vs-cta-pill vs-a-pulse">Try the product →</div>` },
-  ],
-  broadcast: [
-    { key: "cover", label: "Lower-third", html: () => `
-      <div class="vs-broadcast vs-a-in">
-        <div class="vs-bc-badge">LIVE</div>
-        <div class="vs-title">AI News Brief</div>
-        <div class="vs-bc-ticker vs-a-fade">Breaking · models · papers · tools</div>
-      </div>` },
-    { key: "desk", label: "Desk split", html: () => `
-      <div class="vs-split">
-        <div class="vs-split-a vs-a-left"><div class="vs-kicker">HEADLINE</div><div class="vs-title sm">What shipped</div></div>
-        <div class="vs-split-b vs-a-right"><div class="vs-kicker">NOTES</div><p class="vs-body">3 bullets. No fluff.</p></div>
-      </div>` },
-    { key: "ticker", label: "Ticker", html: () => `
-      <div class="vs-chip-row">
-        <span class="vs-chip vs-a-stagger">Fact 1</span>
-        <span class="vs-chip vs-a-stagger">Fact 2</span>
-        <span class="vs-chip vs-a-stagger">Fact 3</span>
-      </div>` },
-    { key: "verdict", label: "Recap", html: () => `
-      <div class="vs-bc-badge vs-a-pop">RECAP</div>
-      <div class="vs-title sm vs-a-up">Three things to remember.</div>` },
-  ],
-  cards: [
-    { key: "cover", label: "Cover card", html: () => `
-      <div class="vs-card-panel vs-a-up"><div class="vs-kicker">Gamma-style</div>
-      <div class="vs-title">One idea. One card.</div>
-      <p class="vs-body">Airy spacing, smart layouts, deck energy.</p></div>` },
-    { key: "ideas", label: "Idea cards", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>A</b><strong>Clear</strong><span>Short copy</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>B</b><strong>Visual</strong><span>Icons optional</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>C</b><strong>Scannable</strong><span>Exec-ready</span></div>
-      </div>` },
-    { key: "split", label: "Split", html: () => `
-      <div class="vs-split">
-        <div class="vs-split-a vs-a-left"><div class="vs-title sm">Before</div></div>
-        <div class="vs-split-b vs-a-right"><div class="vs-title sm">After</div></div>
-      </div>` },
-    { key: "verdict", label: "Summary", html: () => `
-      <div class="vs-card-panel center vs-a-up"><div class="vs-title sm">Summary card · next action</div></div>` },
-  ],
-  pitch: [
-    { key: "cover", label: "Problem", html: () => `
-      <div class="vs-kicker vs-a-in">PITCH</div>
-      <div class="vs-title vs-a-up">The problem in one line.</div>
-      <p class="vs-body">Investor pacing — proof over fluff.</p>` },
-    { key: "solution", label: "Solution", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>1</b><strong>Pillar</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>2</b><strong>Pillar</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>3</b><strong>Pillar</strong></div>
-      </div>` },
-    { key: "traction", label: "Traction", html: () => `
-      <div class="vs-scorecard">
-        <div class="vs-a-pop"><b>USERS</b><i style="--p:70%"></i><span>12k</span></div>
-        <div class="vs-a-pop"><b>MRR</b><i style="--p:55%"></i><span>$48k</span></div>
-      </div>` },
-    { key: "verdict", label: "Ask", html: () => `
-      <div class="vs-cta-pill vs-a-pulse">The ask →</div>` },
-  ],
-  corporate: [
-    { key: "cover", label: "Agenda", html: () => `
-      <div class="vs-kicker">QBR</div>
-      <div class="vs-title vs-a-up">Agenda</div>
-      <div class="vs-min-list vs-a-fade"><p>01 Goals</p><p>02 Results</p><p>03 Next steps</p></div>` },
-    { key: "section", label: "Section", html: () => `
-      <div class="vs-card-panel center vs-a-up"><div class="vs-kicker">SECTION 02</div>
-      <div class="vs-title sm">Results</div></div>` },
-    { key: "bullets", label: "Bullets", html: () => `
-      <div class="vs-min-list vs-a-up">
-        <p>• Clear hierarchy</p><p>• Boardroom-safe</p><p>• One chart max</p>
-      </div>` },
-    { key: "verdict", label: "Next", html: () => `
-      <div class="vs-title sm vs-a-up">Next steps · owners · dates</div>` },
-  ],
-  glass: [
-    { key: "cover", label: "Frost hero", html: () => `
-      <div class="vs-glass vs-a-up"><div class="vs-kicker">GLASS</div>
-      <div class="vs-title">Frosted panels. Soft blur.</div>
-      <p class="vs-body">Gamma / web marketing energy.</p></div>` },
-    { key: "cards", label: "Glass cards", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-glass vs-a-stagger"><strong>Light</strong><span>Airy</span></div>
-        <div class="vs-mini-card vs-glass vs-a-stagger"><strong>Soft</strong><span>Blur</span></div>
-        <div class="vs-mini-card vs-glass vs-a-stagger"><strong>Calm</strong><span>Brand</span></div>
-      </div>` },
-    { key: "feature", label: "Feature", html: () => `
-      <div class="vs-glass vs-a-up"><div class="vs-title sm">One feature. Full focus.</div></div>` },
-    { key: "verdict", label: "CTA", html: () => `
-      <div class="vs-cta-pill vs-a-pulse">Explore →</div>` },
-  ],
-  saas: [
-    { key: "cover", label: "Hero", html: () => `
-      <div class="vs-kicker vs-a-in">SAAS</div>
-      <div class="vs-title vs-a-up">Ship the benefit first.</div>
-      <p class="vs-body">Hero → features → proof → CTA.</p>` },
-    { key: "features", label: "Features", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>✓</b><strong>Fast</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>✓</b><strong>Simple</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>✓</b><strong>Trusted</strong></div>
-      </div>` },
-    { key: "proof", label: "Proof", html: () => `
-      <div class="vs-chip-row">
-        <span class="vs-chip vs-a-stagger">Logo</span>
-        <span class="vs-chip vs-a-stagger">Logo</span>
-        <span class="vs-chip vs-a-stagger">Logo</span>
-      </div>` },
-    { key: "verdict", label: "CTA", html: () => `
-      <div class="vs-cta-pill vs-a-pulse">Start free →</div>` },
-  ],
-  gamma: [
-    { key: "cover", label: "Soft cover", html: () => `
-      <div class="vs-card-panel vs-a-up" style="border-radius:24px">
-        <div class="vs-kicker">GAMMA</div>
-        <div class="vs-title">Soft cards. Smart layouts.</div>
-        <p class="vs-body">One idea per frame — pastel deck energy.</p>
-      </div>` },
-    { key: "ideas", label: "Idea cards", html: () => `
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger" style="border-radius:20px"><b>01</b><strong>Insight</strong><span>Short</span></div>
-        <div class="vs-mini-card vs-a-stagger" style="border-radius:20px"><b>02</b><strong>Proof</strong><span>Visual</span></div>
-        <div class="vs-mini-card vs-a-stagger" style="border-radius:20px"><b>03</b><strong>Action</strong><span>Clear</span></div>
-      </div>` },
-    { key: "matrix", label: "2×2", html: () => `
-      <div class="vs-matrix">
-        <div class="vs-a-stagger"><b>Fast</b><span>Cheap</span></div>
-        <div class="vs-a-stagger"><b>Fast</b><span>Dear</span></div>
-        <div class="vs-a-stagger"><b>Slow</b><span>Cheap</span></div>
-        <div class="vs-a-stagger"><b>Slow</b><span>Dear</span></div>
-      </div>` },
-    { key: "verdict", label: "Close", html: () => `
-      <div class="vs-card-panel center vs-a-up" style="border-radius:24px">
-        <div class="vs-title sm">Leave one next step.</div>
-      </div>` },
-  ],
-  keynote: [
-    { key: "cover", label: "Giant title", html: () => `
-      <div class="vs-cin">
-        <div class="vs-title vs-a-up" style="font-size:clamp(28px,4vw,42px)">Almost empty.</div>
-        <p class="vs-body vs-a-fade" style="text-align:center">Keynote sparsity — giant type, few words.</p>
-      </div>` },
-    { key: "line", label: "One line", html: () => `
-      <div class="vs-title sm vs-a-up" style="text-align:center;max-width:20ch;margin:0 auto">One supporting line. Nothing else.</div>` },
-    { key: "stat", label: "Stat beat", html: () => `
-      <div class="vs-exp-hook"><div class="vs-stat vs-a-pop">3×</div>
-      <div class="vs-title sm">The only number on the slide.</div></div>` },
-    { key: "verdict", label: "Close", html: () => `
-      <div class="vs-quote vs-a-up">“End quiet. Let them lean in.”</div>` },
-  ],
-  slides: [
-    { key: "cover", label: "Title", html: () => `
-      <div class="vs-kicker">TRAINING DECK</div>
-      <div class="vs-title vs-a-up">Classic PowerPoint rhythm</div>
-      <p class="vs-body">Title · section · bullets · chart · next</p>` },
-    { key: "agenda", label: "Agenda", html: () => `
-      <div class="vs-min-list vs-a-up">
-        <p>1. Context</p><p>2. Findings</p><p>3. Plan</p><p>4. Ask</p>
-      </div>` },
-    { key: "bullets", label: "Bullets", html: () => `
-      <div class="vs-title sm">Findings</div>
-      <div class="vs-min-list vs-a-fade">
-        <p>• Boardroom-safe hierarchy</p>
-        <p>• 4–6 bullets max</p>
-        <p>• One chart later</p>
-      </div>` },
-    { key: "verdict", label: "Next", html: () => `
-      <div class="vs-title sm vs-a-up">Next steps</div>
-      <div class="vs-min-list"><p>□ Owner</p><p>□ Date</p><p>□ Done-when</p></div>` },
-  ],
-  notion: [
-    { key: "cover", label: "Page", html: () => `
-      <div class="vs-kicker vs-a-in">DOC</div>
-      <div class="vs-title vs-a-up">Notion-style page</div>
-      <p class="vs-body">Calm wiki clarity — callouts, lists, light chrome.</p>` },
-    { key: "callout", label: "Callout", html: () => `
-      <div class="vs-card-panel vs-a-up">
-        <div class="vs-kicker">CALLOUT</div>
-        <div class="vs-title sm">The insight in one panel.</div>
-        <p class="vs-body">Muted, readable, documentation-first.</p>
-      </div>` },
-    { key: "list", label: "List", html: () => `
-      <div class="vs-min-list vs-a-up">
-        <p>☐ Prerequisite</p><p>☐ Core step</p><p>☐ Edge case</p><p>☐ Ship note</p>
-      </div>` },
-    { key: "verdict", label: "Recap", html: () => `
-      <div class="vs-title sm vs-a-up">Checklist recap</div>
-      <p class="vs-body">Docs energy — leave a runnable next action.</p>` },
-  ],
-  geo_navy: [
-    { key: "cover", label: "Geo title", html: () => `
-      <div class="vs-kicker vs-a-in">GEO NAVY · MONTSERRAT</div>
-      <div class="vs-title vs-a-up">Corner triangles. Boardroom clarity.</div>
-      <p class="vs-body">Navy + cyan geometric frames — agenda, cards, SWOT.</p>` },
-    { key: "agenda", label: "Agenda", html: () => `
-      <div class="vs-kicker">Agenda</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Context</strong><span>Why now</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>System</strong><span>How it fits</span></div>
-        <div class="vs-mini-card vs-a-stagger"><b>03</b><strong>Decision</strong><span>What ships</span></div>
-      </div>` },
-  ],
-  coral_split: [
-    { key: "cover", label: "Split hero", html: () => `
-      <div class="vs-split">
-        <div class="vs-split-a vs-a-left"><div class="vs-title sm">Creative business design</div><p class="vs-body">Poppins · coral energy</p></div>
-        <div class="vs-split-b vs-a-right"><div class="vs-kicker">CTA</div><div class="vs-cta-pill">Begin →</div></div>
-      </div>` },
-  ],
-  blush_soft: [
-    { key: "cover", label: "Blush open", html: () => `
-      <div class="vs-kicker vs-a-in">BLUSH · OUTFIT</div>
-      <div class="vs-title vs-a-up">Soft bands. Thin icons. Calm grids.</div>` },
-  ],
-  mosaic: [
-    { key: "cover", label: "Mosaic", html: () => `
-      <div class="vs-kicker">MOSAIC · MANROPE</div>
-      <div class="vs-title sm">Tile the story</div>
-      <div class="vs-cards-3">
-        <div class="vs-mini-card vs-a-stagger"><b>A</b><strong>Mood</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>B</b><strong>Proof</strong></div>
-        <div class="vs-mini-card vs-a-stagger"><b>C</b><strong>Close</strong></div>
-      </div>` },
-  ],
-  process: [
-    { key: "flow", label: "Pills", html: () => `
-      <div class="vs-kicker">PROCESS · DM SANS</div>
-      <div class="vs-timeline vs-a-fade">
-        <div class="vs-tl-item on"><b>1</b><span>Start</span></div>
-        <div class="vs-tl-item on"><b>2</b><span>Build</span></div>
-        <div class="vs-tl-item"><b>3</b><span>Ship</span></div>
-        <div class="vs-tl-item"><b>4</b><span>End</span></div>
-      </div>` },
-  ],
-  agenda: [
-    { key: "cover", label: "Numbers", html: () => `
-      <div class="vs-kicker">AGENDA GRID · SPACE GROTESK</div>
-      <div class="vs-title">01 · 02 · 03</div>
-      <p class="vs-body">Giant numerals as design — workshop pacing.</p>` },
-  ],
-  rainbow_bar: [
-    { key: "cover", label: "Bar", html: () => `
-      <div class="vs-kicker vs-a-in">RAINBOW BAR · NUNITO</div>
-      <div class="vs-title vs-a-up">Bright multipurpose decks</div>
-      <div class="vs-progress vs-a-grow"><i style="--p:70%;background:linear-gradient(90deg,#f4b400,#4285f4,#0f9d58,#db4437)"></i></div>` },
-  ],
-  circle_stack: [
-    { key: "flow", label: "Circles", html: () => `
-      <div class="vs-kicker">CIRCLE STACK · RUBIK</div>
-      <div class="vs-sysmap">
-        <div class="vs-node vs-a-pop">01</div>
-        <div class="vs-edge"></div>
-        <div class="vs-node accent vs-a-pop">02</div>
-        <div class="vs-edge"></div>
-        <div class="vs-node vs-a-pop">03</div>
-      </div>` },
-  ],
-  hex_grid: [
-    { key: "cover", label: "Hex", html: () => `
-      <div class="vs-kicker">HEX GRID · WORK SANS</div>
-      <div class="vs-title sm">Partners in cells</div>
-      <div class="vs-chip-row"><span class="vs-chip">A</span><span class="vs-chip">B</span><span class="vs-chip">C</span><span class="vs-chip">D</span></div>` },
-  ],
-  wave_soft: [
-    { key: "cover", label: "Wave", html: () => `
-      <div class="vs-kicker">WAVE SOFT · FIGTREE</div>
-      <div class="vs-title vs-a-up">Rounded bands. Fresh flat.</div>
-      <p class="vs-body">Values → portfolio → growth → contact.</p>` },
-  ],
-};
+/** The sample lesson, rendered by the same code that films the real video. */
+const SAMPLE_SLIDES = ["Cover", "Steps", "Compare", "Stats", "Bullets", "Dense text", "Matrix"];
+const PREVIEW_W = 1920;
 
-/** Shared layout varieties (up to 20) — merged into every style kit for Admin preview. */
-const UNIVERSAL_SLIDE_LIBRARY = [
-  { key: "cover", label: "Cover", html: (s) => `
-    <div class="vs-lower-third vs-a-in">${escapeHtml((s && s.label) || "STYLE")} · COVER</div>
-    <div class="vs-title vs-a-up">Open with a clear promise.</div>
-    <p class="vs-body vs-a-fade">Title + one-line stake. Sparse, readable, animation-ready.</p>` },
-  { key: "hook", label: "Hook", html: () => `
-    <div class="vs-exp-hook"><div class="vs-stat vs-a-pop">10×</div>
-    <div class="vs-title sm vs-a-up">Kinetic number that stops the scroll.</div>
-    <p class="vs-body">One metric. One punchline.</p></div>` },
-  { key: "hub", label: "Hub", html: () => `
-    <div class="vs-hub">
-      <div class="vs-hub-core vs-a-pop">Core</div>
-      <div class="vs-hub-node vs-a-stagger">A</div>
-      <div class="vs-hub-node vs-a-stagger">B</div>
-      <div class="vs-hub-node vs-a-stagger">C</div>
-      <div class="vs-hub-node vs-a-stagger">D</div>
-    </div>` },
-  { key: "bullets", label: "Bullets", html: () => `
-    <div class="vs-kicker vs-a-in">Key ideas</div>
-    <div class="vs-min-list vs-a-up">
-      <p>• Concrete fact one</p><p>• Mechanism two</p><p>• Example three</p><p>• Trade-off four</p>
-    </div>` },
-  { key: "compare", label: "Compare", html: () => `
-    <div class="vs-split">
-      <div class="vs-split-a vs-a-left"><div class="vs-kicker">Before</div><div class="vs-title sm">Old way</div></div>
-      <div class="vs-split-b vs-a-right"><div class="vs-kicker">After</div><div class="vs-title sm">New way</div></div>
-    </div>` },
-  { key: "bars", label: "Bars", html: () => `
-    <div class="vs-bars">
-      <div class="vs-a-grow"><span>A</span><i style="--p:88%"></i></div>
-      <div class="vs-a-grow"><span>B</span><i style="--p:62%"></i></div>
-      <div class="vs-a-grow"><span>C</span><i style="--p:35%"></i></div>
-    </div>` },
-  { key: "stat", label: "Stats", html: () => `
-    <div class="vs-scorecard">
-      <div class="vs-a-pop"><b>P50</b><i style="--p:40%"></i><span>12ms</span></div>
-      <div class="vs-a-pop"><b>P99</b><i style="--p:78%"></i><span>90ms</span></div>
-      <div class="vs-a-pop"><b>OK</b><i style="--p:96%"></i><span>96%</span></div>
-    </div>` },
-  { key: "steps", label: "Steps", html: () => `
-    <div class="vs-tut-steps">
-      <div class="vs-a-stagger"><b>1</b>Setup</div>
-      <div class="vs-a-stagger"><b>2</b>Run</div>
-      <div class="vs-a-stagger"><b>3</b>Verify</div>
-      <div class="vs-a-stagger"><b>4</b>Ship</div>
-    </div>` },
-  { key: "flow", label: "Flow", html: () => `
-    <div class="vs-sysmap">
-      <div class="vs-node vs-a-pop">In</div><div class="vs-edge vs-a-draw"></div>
-      <div class="vs-node accent vs-a-pop">Core</div><div class="vs-edge vs-a-draw"></div>
-      <div class="vs-node vs-a-pop">Out</div>
-    </div>` },
-  { key: "matrix", label: "Matrix", html: () => `
-    <div class="vs-cards-3">
-      <div class="vs-mini-card vs-a-stagger"><b>01</b><strong>Facet</strong><span>Detail</span></div>
-      <div class="vs-mini-card vs-a-stagger"><b>02</b><strong>Facet</strong><span>Detail</span></div>
-      <div class="vs-mini-card vs-a-stagger"><b>03</b><strong>Facet</strong><span>Detail</span></div>
-      <div class="vs-mini-card vs-a-stagger"><b>04</b><strong>Facet</strong><span>Detail</span></div>
-    </div>` },
-  { key: "panel", label: "Panel", html: () => `
-    <div class="vs-term vs-a-up">
-      <div class="vs-term-bar"><i></i><i></i><i></i><span>panel</span></div>
-      <div class="vs-term-body">
-        <p><span class="vs-term-p">$</span> run --demo</p>
-        <p class="vs-term-ok">✓ config / API / CLI</p>
-      </div>
-    </div>` },
-  { key: "transform", label: "Transform", html: () => `
-    <div class="vs-split">
-      <div class="vs-split-a vs-a-left"><div class="vs-kicker">From</div><p class="vs-body">Messy input</p></div>
-      <div class="vs-split-b vs-a-right"><div class="vs-kicker">To</div><p class="vs-body">Clean structure</p></div>
-    </div>` },
-  { key: "quote", label: "Quote", html: () => `
-    <blockquote class="vs-quote vs-a-up">“One pivotal insight — leave the rest to narration.”</blockquote>` },
-  { key: "timeline", label: "Timeline", html: () => `
-    <div class="vs-tut-steps">
-      <div class="vs-a-stagger"><b>T0</b>Problem</div>
-      <div class="vs-a-stagger"><b>T1</b>Breakthrough</div>
-      <div class="vs-a-stagger"><b>T2</b>Scale</div>
-      <div class="vs-a-stagger"><b>Now</b>So what</div>
-    </div>` },
-  { key: "checklist", label: "Checklist", html: () => `
-    <div class="vs-min-list vs-a-up">
-      <p>✓ Prerequisite ready</p><p>✓ Core step done</p><p>✓ Edge case covered</p><p>□ Ship checklist</p>
-    </div>` },
-  { key: "agenda", label: "Agenda", html: () => `
-    <div class="vs-kicker">Agenda</div>
-    <div class="vs-title sm vs-a-up">What we'll cover</div>
-    <div class="vs-chip-row">
-      <span class="vs-chip vs-a-stagger">01 Hook</span>
-      <span class="vs-chip vs-a-stagger">02 Teach</span>
-      <span class="vs-chip vs-a-stagger">03 Proof</span>
-      <span class="vs-chip vs-a-stagger">04 Close</span>
-    </div>` },
-  { key: "evidence", label: "Evidence", html: () => `
-    <div class="vs-card-panel vs-a-up">
-      <div class="vs-kicker">Evidence</div>
-      <div class="vs-title sm">Claim → support → caveat</div>
-      <p class="vs-body">Keep citations honest; mark uncertainty.</p>
-    </div>` },
-  { key: "pitfall", label: "Pitfall", html: () => `
-    <div class="vs-split">
-      <div class="vs-split-a vs-a-left"><div class="vs-kicker">Don't</div><p class="vs-body">Common mistake</p></div>
-      <div class="vs-split-b vs-a-right"><div class="vs-kicker">Do</div><p class="vs-body">Correct pattern</p></div>
-    </div>` },
-  { key: "cta", label: "CTA", html: () => `
-    <div class="vs-card-panel center vs-a-up">
-      <div class="vs-title sm">One clear next action.</div>
-      <div class="vs-cta-pill vs-a-pulse">Continue →</div>
-    </div>` },
-  { key: "close", label: "Close", html: (s) => `
-    <div class="vs-cin">
-      <div class="vs-title vs-a-up">Land the idea.</div>
-      <p class="vs-body" style="text-align:center">${escapeHtml((s && s.label) || "Style")} · sparse final beat</p>
-    </div>` },
-];
+function adminSlideKit() {
+  return SAMPLE_SLIDES.map((label, i) => ({ key: String(i), label }));
+}
 
-const MAX_STYLE_PREVIEW_SLIDES = 20;
+function _sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-function adminSlideKit(styleKey) {
-  if (typeof window.uniquePreviewKit === "function") return window.uniquePreviewKit(styleKey);
-  const base = STYLE_PREVIEW_KITS[styleKey] || STYLE_PREVIEW_KITS.explainer || [];
-  const seen = new Set(base.map((s) => s.key));
-  const merged = base.slice();
-  for (const slide of UNIVERSAL_SLIDE_LIBRARY) {
-    if (merged.length >= MAX_STYLE_PREVIEW_SLIDES) break;
-    if (seen.has(slide.key)) continue;
-    seen.add(slide.key);
-    merged.push(slide);
+async function _playSampleSlide(frame, idx) {
+  const token = (frame._tok = (frame._tok || 0) + 1);
+  const w = frame.contentWindow;
+  if (!w || typeof w.gotoSlide !== "function") return;
+  try {
+    if (!frame._cap) {
+      if (w.document.fonts && w.document.fonts.ready) await w.document.fonts.ready;
+      w.enterCaptureMode();
+      frame._cap = true;
+    }
+    w.gotoSlide(idx);
+    for (let k = 0; k < 40 && !w.__slideReady; k++) await _sleep(100);
+    if (token !== frame._tok) return;
+    const total = 48;
+    for (let f = 0; f < total; f += 2) {
+      if (token !== frame._tok) return;
+      w.__seekFrame(f, total);
+      await _sleep(34);
+    }
+    if (token === frame._tok) w.__seekFrame(total - 1, total);
+  } catch (e) { /* preview is best-effort */ }
+}
+
+function mountRealPreview(canvas, style, theme, idx) {
+  if (!canvas) return;
+  const url = `/api/style-preview?style=${encodeURIComponent(style)}&theme=${encodeURIComponent(theme)}`;
+  let f = canvas._real;
+  const fit = () => {
+    if (canvas._real) canvas._real.style.transform = `scale(${canvas.clientWidth / PREVIEW_W})`;
+  };
+  if (!f) {
+    f = document.createElement("iframe");
+    f.className = "real-preview";
+    f.title = "Sample lesson in this template";
+    f.tabIndex = -1;
+    canvas.innerHTML = "";
+    canvas.appendChild(f);
+    canvas._real = f;
+    if (window.ResizeObserver) new ResizeObserver(fit).observe(canvas);
   }
-  return merged.slice(0, MAX_STYLE_PREVIEW_SLIDES);
+  fit();
+  canvas._want = idx;
+  if (f.dataset.url !== url) {
+    f.dataset.url = url;
+    f._cap = false;
+    f._tok = (f._tok || 0) + 1;
+    f.onload = () => _playSampleSlide(f, canvas._want);
+    f.src = url;
+  } else if (f.contentWindow && f.contentWindow.gotoSlide) {
+    _playSampleSlide(f, idx);
+  }
 }
 
 function renderAdminVisualStyles() {
@@ -2337,18 +1137,21 @@ function renderAdminVisualStyles() {
     const studioPick = shown.find((p) => p.key === selectedPreset)
       || (selectedStyle !== "auto" && shown.find((p) => p.style === selectedStyle));
     if (studioPick) {
-      adminPreviewPreset = studioPick.key;
+      // Keep the colour the user picked for this template.
+      const keepTheme = selectedStyle === studioPick.style && selectedTheme && selectedTheme !== "auto";
       adminPreviewStyle = studioPick.style;
-      adminPreviewTheme = studioPick.theme;
+      adminPreviewTheme = keepTheme ? selectedTheme : studioPick.theme;
+      adminPreviewPreset = keepTheme ? `${studioPick.style}:${selectedTheme}` : studioPick.key;
     }
   }
   if (!shown.find((p) => p.key === adminPreviewPreset)) {
     const match = shown.find((p) => p.style === adminPreviewStyle)
       || shown[0];
     if (match) {
-      adminPreviewPreset = match.key;
+      const sameStyle = match.style === adminPreviewStyle && adminPreviewTheme;
       adminPreviewStyle = match.style;
-      adminPreviewTheme = match.theme;
+      if (!sameStyle) adminPreviewTheme = match.theme;
+      adminPreviewPreset = sameStyle ? `${match.style}:${adminPreviewTheme}` : match.key;
     }
   }
   const grid = $("admin-style-grid");
@@ -2357,7 +1160,8 @@ function renderAdminVisualStyles() {
     shown.forEach((p) => {
       const card = document.createElement("button");
       card.type = "button";
-      const active = p.key === adminPreviewPreset || p.key === selectedPreset;
+      const active = p.key === adminPreviewPreset || p.key === selectedPreset
+        || (p.style === adminPreviewStyle && p.key !== "auto");
       card.className = "style-card visual-preset-admin-card visual-preset-card"
         + (active ? " active" : "");
       card.dataset.preset = p.key;
@@ -2387,28 +1191,36 @@ function renderAdminSlidePreview() {
   const preset = (visualPresets || []).find((p) => p.key === adminPreviewPreset)
     || (visualPresets || []).find((p) => p.style === adminPreviewStyle && p.theme === adminPreviewTheme)
     || (visualPresets || []).find((p) => p.style === adminPreviewStyle)
-    || { key: "explainer:midnight", style: "explainer", theme: "midnight",
-         label: "Explainer · Midnight Blue", style_label: "Explainer",
-         theme_label: "Midnight Blue", description: "", template: "", swatch: [] };
-  const styleKey = preset.style || adminPreviewStyle || "explainer";
-  const styleMeta = (videoStyles || []).find((s) => s.key === styleKey)
-    || { key: styleKey, label: preset.style_label || styleKey, description: "", template: "" };
-  const kit = adminSlideKit(styleKey);
+    || { key: "whiteboard:snow", style: "whiteboard", theme: "snow",
+         label: "Whiteboard", style_label: "Whiteboard",
+         theme_label: "Snow", description: "", template: "", swatch: [] };
+  const isAuto = preset.key === "auto" || preset.style === "auto";
+  // Auto has no look of its own yet, so show the default template.
+  const styleKey = isAuto ? "whiteboard" : (preset.style || adminPreviewStyle || "whiteboard");
+  const themeObj = (videoThemes || []).find((t) => t.key === adminPreviewTheme);
+  const themeKey = isAuto ? "snow" : ((themeObj && themeObj.key) || preset.theme || "snow");
+  const themeLabel = isAuto ? "" : ((themeObj && themeObj.label) || preset.theme_label || "");
+  const kit = adminSlideKit();
   const mock = kit[adminSlideIdx] || kit[0];
   const name = $("admin-style-name");
   const desc = $("admin-style-desc");
   const tmpl = $("admin-style-template");
   const swatchEl = $("admin-style-swatch");
-  if (name) name.textContent = preset.label || `${styleMeta.label} · ${preset.theme_label || ""}`;
+  if (name) {
+    name.textContent = isAuto
+      ? "Auto · picks the template from your document"
+      : `${preset.style_label || preset.label}${themeLabel ? ` · ${themeLabel}` : ""}`;
+  }
   if (desc) {
-    const fontName = preset.font_label || styleMeta.font_label || "";
-    const rawDesc = preset.description || styleMeta.description || "";
-    const already = fontName && rawDesc.toLowerCase().includes(fontName.toLowerCase());
-    desc.textContent = (fontName && !already ? `Font: ${fontName}. ` : "") + rawDesc;
+    desc.textContent = isAuto
+      ? "Reads the document type, topic and format, then chooses one of the twelve templates. Shown here: Whiteboard."
+      : (preset.description || "");
   }
   if (tmpl) {
-    const variety = preset.variety || preset.template || styleMeta.template || "";
-    tmpl.textContent = variety ? `Variety: ${variety}` : "";
+    tmpl.textContent = isAuto ? "" : [
+      preset.category_label ? `Template: ${preset.category_label}` : "",
+      preset.uses ? `Best for: ${preset.uses}` : "",
+    ].filter(Boolean).join("  ·  ");
   }
   if (swatchEl) {
     swatchEl.innerHTML = (preset.swatch || []).slice(0, 3).map((c) =>
@@ -2418,25 +1230,14 @@ function renderAdminSlidePreview() {
 
   const frame = $("admin-slide-frame");
   const canvas = $("admin-slide-canvas");
-  const colors = preset.colors || {};
   if (frame) {
-    frame.dataset.style = styleKey;
-    frame.dataset.layout = (mock && mock.key) || "cover";
-    frame.dataset.theme = preset.theme || "";
-    frame.dataset.palette = colors.bg ? "1" : "";
-    if (colors.bg) frame.style.setProperty("--palette-bg", colors.bg);
-    if (colors.ink) frame.style.setProperty("--palette-ink", colors.ink);
-    if (colors.accent) frame.style.setProperty("--palette-accent", colors.accent);
-    if ((preset.swatch || [])[1]) frame.style.setProperty("--palette-b", preset.swatch[1]);
+    frame.dataset.real = "1";
+    frame.dataset.style = "";
+    frame.dataset.palette = "";
   }
   if (canvas) {
-    canvas.className = "visual-slide visual-slide-" + styleKey
-      + (preset.dark === false ? " visual-slide-light-palette" : "");
-    canvas.innerHTML = mock.html(styleMeta);
-    // Restart entrance animations on every slide change.
-    canvas.classList.remove("vs-play");
-    void canvas.offsetWidth;
-    canvas.classList.add("vs-play");
+    canvas.className = "visual-slide visual-slide-real";
+    mountRealPreview(canvas, styleKey, themeKey, adminSlideIdx);
   }
 
   const counter = $("admin-slide-counter");
@@ -2465,7 +1266,7 @@ function renderAdminSlidePreview() {
 }
 
 function adminSlideStep(delta) {
-  const kit = adminSlideKit(adminPreviewStyle);
+  const kit = adminSlideKit();
   const n = kit.length;
   adminSlideIdx = (adminSlideIdx + delta + n) % n;
   renderAdminSlidePreview();
@@ -6729,7 +5530,8 @@ async function loadCosts() {
     const rep = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(apiDetail(rep, "Failed to load costs"));
     lastCostReport = rep;
-  renderCosts(rep);
+    renderCostStorage(rep.storage);
+    renderCosts(rep);
   } catch (e) {
     if (cards) cards.innerHTML = "";
     ["cost-breakdown", "cost-section-day"].forEach((id) => {
@@ -6741,6 +5543,19 @@ async function loadCosts() {
       empty.classList.remove("hidden");
     }
   }
+}
+
+function renderCostStorage(st) {
+  const el = $("cost-storage-line");
+  if (!el) return;
+  if (!st) { el.textContent = ""; return; }
+  const where = st.backend === "firestore"
+    ? `Saved in Firestore${st.project ? ` (${st.project})` : ""}`
+    : st.mode === "hosted"
+      ? "Saved in SQLite on the container, lost on restart (Firestore not connected)"
+      : "Saved in SQLite on this machine";
+  const pend = st.pending ? ` · ${st.pending} syncing` : "";
+  el.textContent = `${where}${pend}${st.warning ? ` · ${st.warning}` : ""}`;
 }
 
 function renderCosts(rep) {
@@ -6961,8 +5776,24 @@ async function loadHarnessTools() {
     const res = await fetch("/api/agent/tools");
     const data = await res.json().catch(() => ({}));
     const tools = data.tools || [];
-    const valEl = $("harness-tools-val");
-    if (valEl) valEl.textContent = `${tools.length} Registered Tools`;
+    const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+    // Every number on this panel comes from the server, nothing is typed in here.
+    const turns = Number(data.max_turns) || 0;
+    const mutating = tools.filter((t) => t.mutates).length;
+    setText("harness-status-val", turns ? `Up to ${turns} turns` : "Not available");
+    setText("harness-tools-val", `${tools.length} tool${tools.length === 1 ? "" : "s"}`);
+    setText("harness-tools-desc", mutating
+      ? `${mutating} can write, the rest only read. Strict schemas.`
+      : "Strict parameter schemas, sandboxed dispatch");
+    setText("harness-tools-tab-count", tools.length ? `(${tools.length})` : "");
+    const audit = tools.find((t) => t.name === "audit_and_fix_slides");
+    setText("harness-audit-val", audit ? "Pre-render audit" : "Not registered");
+    setText("harness-audit-desc", audit ? audit.description : "");
+    const backend = data.memory_backend === "firestore" ? "Firestore" : "SQLite";
+    setText("harness-memory-desc", `Working memory · checkpoint traces · long-term store in ${backend}`);
+    setText("harness-subtitle",
+      `Bounded ReAct controller · ${tools.length} schema-validated tools · layered memory (${backend})`);
+    renderStorageCard(data.storage);
 
     const grid = $("harness-tools-grid");
     if (!grid) return;
@@ -6983,6 +5814,29 @@ async function loadHarnessTools() {
   } catch (e) {
     console.warn("Failed to load harness tools", e);
   }
+}
+
+/** Firebase / storage status: where jobs, costs and agent memory are saved right now. */
+function storageSummary(st) {
+  if (!st) return { val: "Unknown", desc: "Status not available", warn: "" };
+  const stores = st.stores || {};
+  const label = (v) => (v === "firestore" ? "Firestore" : "SQLite");
+  const where = `jobs ${label(stores.jobs)} · costs ${label(stores.costs)} · memory ${label(stores.memory)}`;
+  let val;
+  if (st.connected) val = st.hosted ? "Hosted · Firestore" : "Local · Firestore";
+  else val = st.hosted ? "Hosted · NOT connected" : "Local · SQLite";
+  const proj = st.project ? ` · project ${st.project}` : "";
+  return { val, desc: `${where}${proj}`, warn: st.warning || "" };
+}
+
+function renderStorageCard(st) {
+  const sum = storageSummary(st);
+  const v = $("harness-storage-val");
+  const d = $("harness-storage-desc");
+  const card = $("harness-storage-card");
+  if (v) v.textContent = sum.val;
+  if (d) d.textContent = sum.warn || sum.desc;
+  if (card) card.classList.toggle("is-warn", Boolean(sum.warn));
 }
 
 async function loadHarnessMemory(query = "", namespace = "") {

@@ -10,11 +10,13 @@ from __future__ import annotations
 import base64
 import re
 import random
+import threading
 import time
 from pathlib import Path
 
 from ..config import get_settings
 from ..logging_setup import log
+from . import ratelimit
 
 
 class LLMError(RuntimeError):
@@ -85,29 +87,22 @@ def _response_text(response) -> str:
 
 
 def _rate_limited(exc: BaseException | None) -> bool:
-    msg = str(exc or "").lower()
-    return any(
-        token in msg
-        for token in ("429", "rate", "resource_exhausted", "quota", "too many requests")
-    )
+    return ratelimit.is_rate_limited(exc)
 
 
 def _retry_wait(exc: BaseException | None, attempt: int, base: float) -> float:
     """Seconds to wait. Rate-limit responses name their own delay when they can."""
-    if _rate_limited(exc):
-        match = re.search(r"retry in\s+([0-9.]+)\s*s", str(exc or ""), re.I)
-        if match:
-            return min(90.0, float(match.group(1)) + 1.0)
-        return min(75.0, 15.0 * (2 ** attempt))
-    return base * (2 ** attempt) + random.uniform(0, base * 0.5)
+    return ratelimit.backoff_delay(exc, attempt, base)
 
 
 def _retryable(fn, *, task: str, provider: str, model: str):
     """Run ``fn`` with backoff on transient failures.
 
-    A single attempt that returns an EMPTY string is treated as a soft failure
-    and retried too. Rate-limit errors ("Rate exceeded") wait longer and get
-    extra attempts so a burst does not kill the slide build.
+    Every attempt first passes the shared gate (``ratelimit.throttle``), so
+    parallel slide / page / voice calls are spaced out. A rate-limit error
+    pauses *all* threads for the delay Google names, then retries, with extra
+    attempts because waiting is what clears it. An empty reply is a soft failure
+    and is retried too.
     """
     settings = get_settings()
     attempts = max(1, int(settings.llm_max_retries))
@@ -115,6 +110,7 @@ def _retryable(fn, *, task: str, provider: str, model: str):
     last_exc: Exception | None = None
     i = 0
     while i < attempts:
+        ratelimit.throttle()
         try:
             out = fn()
             if out and out.strip():
@@ -126,8 +122,7 @@ def _retryable(fn, *, task: str, provider: str, model: str):
                 )
         except Exception as e:  # noqa: BLE001 - classify + backoff below
             last_exc = e
-            if _rate_limited(e):
-                attempts = max(attempts, 6)
+            attempts = ratelimit.attempts_for(e, attempts)
             if i < attempts - 1:
                 log.bind(task=task).warning(
                     f"{provider}/{model} attempt {i + 1} failed ({e}); retrying"
@@ -135,16 +130,17 @@ def _retryable(fn, *, task: str, provider: str, model: str):
         if i < attempts - 1:
             delay = _retry_wait(last_exc, i, base)
             if _rate_limited(last_exc):
+                ratelimit.note_limit(delay)
                 log.bind(task=task).warning(
-                    f"{provider}/{model} rate limited; waiting {delay:.0f}s"
+                    f"{provider}/{model} rate limited; all calls pause {delay:.0f}s"
                 )
             time.sleep(delay)
         i += 1
     if isinstance(last_exc, Exception):
         if _rate_limited(last_exc):
             raise LLMError(
-                "Gemini rate limit (Rate exceeded). The build waited and retried. "
-                "Start it again in a minute, or use gemini-3.8-flash."
+                "Gemini rate limit (Rate exceeded). The build paused and retried several "
+                "times. Start it again in a minute, or lower LLM_MAX_PARALLEL."
             ) from last_exc
         raise last_exc
     raise LLMError(f"{provider}/{model} produced no content")
@@ -163,6 +159,29 @@ def _mime_for(path: Path) -> str:
 
 
 # ----------------------------------------------------------------- Gemini ----
+
+# Gemini reports the tokens it billed on every response. The call sites below
+# stash them per thread so ``_record_cost`` can store real numbers, not the
+# characters-divided-by-four guess (which undercounts thinking tokens).
+_usage_tls = threading.local()
+
+
+def _stash_usage(response) -> None:
+    try:
+        um = getattr(response, "usage_metadata", None)
+        pin = int(getattr(um, "prompt_token_count", 0) or 0)
+        out = int(getattr(um, "candidates_token_count", 0) or 0)
+        out += int(getattr(um, "thoughts_token_count", 0) or 0)  # billed as output
+        _usage_tls.usage = (pin, out) if (pin or out) else None
+    except Exception:  # noqa: BLE001
+        _usage_tls.usage = None
+
+
+def _take_usage() -> tuple[int, int] | None:
+    got = getattr(_usage_tls, "usage", None)
+    _usage_tls.usage = None
+    return got
+
 
 def _gemini_client():
     from google import genai
@@ -208,6 +227,7 @@ def _gemini_generate_text(
         contents=prompt,
         **({"config": config} if config else {}),
     )
+    _stash_usage(response)
     text = _response_text(response)
     if not text:
         # A response with no text but a finish_reason of MAX_TOKENS means the
@@ -255,6 +275,7 @@ def _gemini_generate_from_images(
         contents=parts,
         **({"config": config} if config else {}),
     )
+    _stash_usage(response)
     return _response_text(response)
 
 
@@ -436,7 +457,9 @@ def generate_image(prompt: str, out_path: Path) -> Path:
     attempts = max(1, int(settings.llm_max_retries))
     base = float(settings.llm_retry_base_delay)
     last_exc: Exception | None = None
-    for i in range(attempts):
+    i = 0
+    while i < attempts:
+        ratelimit.throttle()
         try:
             path = _gemini_generate_image(prompt, Path(out_path))
             if path and Path(path).is_file() and Path(path).stat().st_size > 0:
@@ -448,12 +471,17 @@ def generate_image(prompt: str, out_path: Path) -> Path:
             last_exc = LLMError("Nano Banana Pro returned an empty image file")
         except Exception as e:  # noqa: BLE001
             last_exc = e
+            attempts = ratelimit.attempts_for(e, attempts)
             if i < attempts - 1:
                 log.bind(task="IMG").warning(
                     f"gemini/{model} attempt {i + 1} failed ({e}); retrying"
                 )
         if i < attempts - 1:
-            time.sleep(base * (2 ** i) + random.uniform(0, base * 0.5))
+            delay = ratelimit.backoff_delay(last_exc, i, base)
+            if ratelimit.is_rate_limited(last_exc):
+                ratelimit.note_limit(delay)
+            time.sleep(delay)
+        i += 1
 
     log.bind(task="IMG").error(f"image failed (gemini/{model}): {last_exc}")
     if isinstance(last_exc, Exception):
@@ -464,15 +492,21 @@ def generate_image(prompt: str, out_path: Path) -> Path:
 def _record_cost(
     provider: str, model: str, kind: str, prompt: str, output: str, extra_in: int = 0
 ) -> None:
-    """Record an estimated-cost usage event (best-effort, never raises)."""
+    """Record a usage event (best-effort, never raises).
+
+    Uses the token counts Gemini returned for this call when there are any;
+    otherwise falls back to an estimate from the text length.
+    """
     try:
         from .. import costs
 
-        it = costs.estimate_tokens(prompt) + int(extra_in)
-        costs.record(
-            provider=provider, model=model, kind=kind,
-            in_tokens=it, out_tokens=costs.estimate_tokens(output),
-        )
+        real = _take_usage() if kind in ("text", "vision") else None
+        if real:
+            it, ot = real
+        else:
+            it = costs.estimate_tokens(prompt) + int(extra_in)
+            ot = costs.estimate_tokens(output)
+        costs.record(provider=provider, model=model, kind=kind, in_tokens=it, out_tokens=ot)
     except Exception:  # noqa: BLE001
         pass
 
@@ -495,6 +529,11 @@ def parallel_map(fn, items: list, ordered: bool = True) -> list:
     # A short gap between starts. Calls still overlap, they just do not all
     # hit Gemini in the same instant (that is what triggers "Rate exceeded").
     gap = 0.45
+    # Worker threads start with an empty context; bind the caller's so spend from
+    # each parallel call is still attributed to the job that made it.
+    from .. import costs
+
+    fn = costs.bind_context(fn)
     if workers <= 1 or len(items) == 1:
         for i, it in enumerate(items):
             try:

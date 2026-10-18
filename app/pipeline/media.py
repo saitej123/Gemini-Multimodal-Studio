@@ -155,9 +155,13 @@ def synthesize_many(
         return []
     workers = max(1, min(int(workers), len(items)))
 
-    def _one(item: tuple[str, Path]) -> str:
+    def _one_raw(item: tuple[str, Path]) -> str:
         text, out = item
         return tts.synthesize(text or "...", out, voice=voice)
+
+    from .. import costs
+
+    _one = costs.bind_context(_one_raw)  # keep the job id on worker threads
 
     if workers == 1:
         return [_one(it) for it in items]

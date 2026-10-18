@@ -56,11 +56,11 @@ class Settings(BaseSettings):
     # --- Resilience & concurrency ---
     # Transient failures (rate limits, timeouts, empty JSON) are retried with
     # exponential backoff instead of breaking the run.
-    llm_max_retries: int = 3
+    llm_max_retries: int = 4
     llm_retry_base_delay: float = 1.5
     llm_timeout_seconds: float = 600.0
     # Max Gemini calls to run at once. 0 = 2, so a slide build is less likely to hit "Rate exceeded".
-    llm_max_parallel: int = 3
+    llm_max_parallel: int = 2
     # VLM page extraction: small page-groups so one call is not handed a huge
     # multi-image prompt. Groups run in parallel up to llm_max_parallel.
     vlm_pages_per_call: int = 2
@@ -289,6 +289,15 @@ class Settings(BaseSettings):
     # --- Firebase & Cloud Firestore ---
     firestore_enabled: bool = True
     firestore_collection: str = "studio_jobs"
+    firestore_usage_collection: str = "studio_usage"
+    firestore_memory_collection: str = "studio_agent_memory"
+    google_cloud_project: str = ""
+    # Where the admin cost report and the agent's memory live:
+    #   auto       Firestore when connected (always on Cloud Run), else SQLite on disk
+    #   sqlite     always the local SQLite file
+    #   firestore  always Firestore
+    cost_store: str = "auto"
+    memory_store: str = "auto"
 
     # --- Topic web research ("Add topics" in More options) ---
     # When the user lists extra topics, we scrape/search the public web and

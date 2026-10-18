@@ -233,7 +233,7 @@ def strip(slide, text, y=4.95, h=0.42):
 def s_brief(slide) -> None:
     label(slide, 0.32, 1.42, 9.36, 0.9, "Drop a chapter. Get a lesson students keep watching.", size=26, face=SEMI, color=INK)
     label(slide, 0.32, 2.12, 9.36, 0.5,
-          "Six real looks, hand-drawn motion, and a highlight that follows the voice. It plays like a teacher at the board, not a deck read aloud.",
+          "Twelve real looks, hand-drawn motion, and a highlight that follows the voice. It plays like a teacher at the board, not a deck read aloud.",
           size=13, color=MUTED)
     cols = [
         ("You give", "A PDF, a few notes, or just a topic. Pick the class age, the video shape and a look.", BLUE, BLUE_T),
@@ -261,7 +261,7 @@ def s_features(slide) -> None:
     feats = [
         ("One file in, one video out", "PDF, notes or a topic. No slide editing, no recording."),
         ("Pitched at the class", "Pick the age and what students already know. The wording follows."),
-        ("Six real templates", "Whiteboard, notebook, poster, editorial, broadcast, bento. Own layout, font and motion each."),
+        ("Twelve real templates", "Chalkboard, magazine, glass, pop, cinema, terminal and six more. Own layout, font and motion each."),
         ("Fits the content", "Type is sized per slide: short ideas go big, dense ones shrink. The whole frame is used."),
         ("Voice, highlight and pen in time", "Gemini 3.8 Live speaks. The highlight moves point by point and lines draw on as it is explained."),
         ("Ready for YouTube", "Landscape, Shorts, Reels or square from the same run."),
@@ -321,7 +321,7 @@ def s_arch(slide) -> None:
     for j, (t, b) in enumerate([("FastAPI jobs", "Runs the steps in order"), ("Chrome frames", "Films slides and drawn lines"), ("FFmpeg", "Joins picture and sound")]):
         card(slide, 3.6, 2.0 + j * 1.0, 2.8, 0.88, title=t, body=b, accent=GREEN, tint=WHITE, title_size=12, body_size=10.5, pad=0.12, line=LINE)
     box(7.38, 1.7, 2.3, 1.2, "Gemini", "3.8 Flash reads and writes. 3.8 Live speaks.", RED_T, RED)
-    box(7.38, 3.2, 2.3, 0.95, "Firestore", "A copy of every job.", YELLOW_T, YELLOW)
+    box(7.38, 3.2, 2.3, 1.1, "Firestore", "Jobs, cost log and agent memory. SQLite when local.", YELLOW_T, YELLOW)
     box(0.32, 3.2, 2.3, 0.95, "MP4", "Comes back to the teacher.", GREEN_T, GREEN)
     arrow(slide, 2.65, 2.3, 3.43, 2.3)
     arrow(slide, 6.57, 2.3, 7.36, 2.3)
@@ -336,14 +336,14 @@ def s_tech(slide) -> None:
         ("Gemini 4 Argon", "Steps in when a chapter is dense."),
         ("Gemini 3.8 Live", "The voice for every slide."),
         ("Cloud Run", "Hosts the app and the video work."),
-        ("Firestore", "Keeps a copy of each job."),
+        ("Firestore", "Jobs, cost log and agent memory when hosted. SQLite on a laptop."),
         ("Firebase Hosting", "Serves this pitch page."),
     ]
     for i, (t, b) in enumerate(techs):
         c, tint = PALETTE[[0, 0, 1, 2, 2, 3][i]]
         r, col = divmod(i, 3)
         card(slide, 0.32 + col * 3.16, 1.5 + r * 1.62, 3.04, 1.48, title=t, body=b, accent=c, tint=tint, title_size=14, body_size=12, line=None)
-    label(slide, 0.32, 4.75, 9.36, 0.5, "Inside the container: FastAPI, Playwright and FFmpeg. The six looks and the drawn animation are plain HTML, CSS and a small script, so no extra model is called.", size=11.5, color=MUTED)
+    label(slide, 0.32, 4.75, 9.36, 0.5, "Inside the container: FastAPI, Playwright and FFmpeg. The twelve looks and the drawn animation are plain HTML, CSS and a small script, so no extra model is called.", size=11.5, color=MUTED)
 
 
 def s_cost(slide) -> None:
@@ -357,7 +357,7 @@ def s_cost(slide) -> None:
              body=f"{n} video, {usd}", accent=c, tint=tint, title_size=20, body_size=12, line=None, pad=0.16)
     rest = [
         ("Where it goes", "Voice is about 73%, slide writing 16%, planning and notes 10%. Voice is the lever, so voice choice matters most.", RED, RED_T),
-        ("Logged, not guessed", "Admin > Costs records every call: model, tokens and dollars, per job and per day. Two live voice tests so far: $0.002.", BLUE, BLUE_T),
+        ("Logged, not guessed", "Admin > Costs logs every call: model, real token count, dollars, per job and day. Firestore when hosted, SQLite on a laptop.", BLUE, BLUE_T),
         ("Hosting about \u20b90", "No GPU. Cloud Run and Firestore stay in the free tier at review traffic. Looks and drawn motion are CSS, no model call.", GREEN, GREEN_T),
     ]
     for i, (t, b, c, tint) in enumerate(rest):
@@ -370,7 +370,7 @@ def s_cost(slide) -> None:
 def s_shots(slide) -> None:
     picture(slide, "docs/screenshots/looks-sheet.png", 0.32, 1.45, 9.36, 3.52)
     label(slide, 0.32, 5.0, 9.36, 0.3,
-          "Top row: whiteboard, broadcast, poster. Bottom row: editorial, bento, notebook. Real frames from our renderer.",
+          "Six of the twelve looks: whiteboard, broadcast, poster, editorial, bento, notebook. Real frames from our renderer.",
           size=11, color=MUTED)
 
 
@@ -402,7 +402,7 @@ def _title_like(src_slide, dst_slide, text: str) -> None:
 
 def s_future(slide) -> None:
     items = [
-        ("Built today", "Six looks, hand-drawn strokes, type sized to fit, and a highlight that follows the voice.", GREEN, GREEN_T),
+        ("Built today", "Twelve looks, stamp/flip/zoom/type-in motion, hand-drawn strokes, type sized to fit, and a highlight that follows the voice.", GREEN, GREEN_T),
         ("More animation", "Charts and arrows that build step by step, Manim-style formulas, a pen that circles key words, short moves between sections.", BLUE, BLUE_T),
         ("More engaging content", "A question after each section, a one-line recap card, a 'try it' prompt, and an optional quiz at the end.", RED, RED_T),
         ("Better voice", "A voice per subject, more languages, and a slower pace for younger classes.", YELLOW, YELLOW_T),
@@ -447,6 +447,29 @@ def s_future_use(slide) -> None:
              title_size=14, body_size=12, line=None)
     pill(slide, 0.32, 4.85, 9.36, 0.42, "Our edge: voice, pen and highlight in time. Next: a face that opens and closes the lesson.",
          tint=INK, color=WHITE, size=12)
+
+
+def s_future_agent(slide) -> None:
+    steps = [
+        ("Inspect", "Document type, formulas, key numbers."),
+        ("Recall", "Style rules learned on past runs."),
+        ("Draft", "Gemini writes the slides."),
+        ("Audit", "Repeated headings, repeated visuals, narration pace."),
+        ("Repair, save", "Fixes headings, re-checks, keeps a receipt."),
+    ]
+    w = 1.8
+    for i, (t, b) in enumerate(steps):
+        c, tint = PALETTE[[0, 3, 1, 2, 0][i]]
+        card(slide, 0.32 + i * (w + 0.09), 1.45, w, 1.38, title=t, body=b, accent=c, tint=tint, num=i + 1,
+             title_size=12, body_size=10, line=None, pad=0.11)
+    why = [
+        ("Why it matters", "A flawed deck found after filming wastes the costly steps: voice, capture, encode. The audit runs first, so a flaw costs seconds, not a rerun.", RED, RED_T),
+        ("What it automates", "Picking a template and palette, spotting repeats, fixing headings, remembering what worked for this kind of file. No teacher does these by hand.", GREEN, GREEN_T),
+        ("Plainly", "The order is fixed and Gemini only writes the slides. That keeps cost bounded and every run explainable. It does not choose its own tools.", BLUE, BLUE_T),
+    ]
+    for i, (t, b, c, tint) in enumerate(why):
+        card(slide, 0.32 + i * 3.16, 2.98, 3.04, 1.72, title=t, body=b, accent=c, tint=tint, title_size=13, body_size=10.5, line=None, pad=0.13)
+    strip(slide, "Every turn is logged: thought, tool, result, time. Saved in Firestore when hosted, SQLite locally.", y=4.82, h=0.4)
 
 
 def clone_chrome(prs, src_slide):
@@ -528,6 +551,10 @@ def main() -> None:
     _title_like(fut, modes, "Additional Details: add a look, or use none")
     s_future_modes(modes)
     move_after(prs, modes, fut)
+    agent = clone_chrome(prs, fut)
+    _title_like(fut, agent, "Additional Details: the agent behind the deck")
+    s_future_agent(agent)
+    move_after(prs, agent, fut)
     blank = [sl for sl in prs.slides
              if not any(sh.has_text_frame and sh.text_frame.text.strip() for sh in sl.shapes)
              and len(sl.shapes) == 3][0]

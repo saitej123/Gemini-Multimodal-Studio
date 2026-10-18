@@ -58,6 +58,7 @@ class ToolDefinition:
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
+            "mutates": self.is_mutation,
         }
 
 
@@ -133,7 +134,7 @@ class AgentHarness:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        """Register the 8 specialized domain tools for the agent harness."""
+        """Register the domain tools (see ``tools.get_catalog()`` for the live list)."""
 
         # 1. Document inspector
         def tool_inspect_document(text: str) -> dict[str, Any]:
@@ -310,7 +311,7 @@ class AgentHarness:
                     recommendations.append(f"Differentiate heading on slide {sl_idx}: {msg}")
                 elif "duplicate_visual" in iss.get("kind", ""):
                     recommendations.append(f"Change layout geometry or vary bullet count on slide {sl_idx}.")
-                elif "speed" in iss.get("kind", "") or "sync" in iss.get("kind", ""):
+                elif any(k in iss.get("kind", "") for k in ("voice", "narration", "speed", "sync")):
                     recommendations.append(f"Adjust word count or dwell time on slide {sl_idx} for narration sync.")
 
             return {
@@ -318,6 +319,10 @@ class AgentHarness:
                 "issues": issues[:6],
                 "clean": len(issues) == 0,
                 "recommendations": recommendations,
+                # Every slide that needs a new heading, not just the first few issues.
+                "duplicate_heading_slides": sorted(
+                    {int(i["slide"]) for i in issues if i.get("kind") == "duplicate_heading" and i.get("slide")}
+                ),
             }
 
         self.tools.register(
@@ -363,6 +368,22 @@ class AgentHarness:
             },
             func=tool_draft_slide_deck,
         )
+
+    @staticmethod
+    def _distinct_heading(slide: dict[str, Any], number: int) -> str:
+        """A heading that no longer repeats an earlier slide: add the first on-screen point."""
+        head = str(slide.get("heading") or "").strip()
+        try:
+            from .sync import slide_focus_texts
+
+            hints = [t.strip() for t in slide_focus_texts(slide) if t and t.strip()]
+        except Exception:  # noqa: BLE001
+            hints = []
+        hint = next((h for h in hints if h.lower() != head.lower()), "")
+        if hint:
+            hint = hint if len(hint) <= 38 else hint[:37].rsplit(" ", 1)[0] + "…"
+            return f"{head}: {hint}" if head else hint
+        return f"{head} ({number})" if head else f"Part {number}"
 
     def execute_turn(
         self,
@@ -500,25 +521,30 @@ class AgentHarness:
         )
         turn += 1
 
-        # Turn 6: Self-Correction (if issues found)
-        if issue_count > 0 and turn <= self.max_turns:
-            t6_thought = f"Repair {issue_count} detected slide issues (e.g. duplicate headings or visuals)."
-            # Apply automatic repairs on duplicate headings
-            fixed_slides = []
-            seen_headings = set()
-            for i, sl in enumerate(slides):
-                sl_copy = dict(sl)
-                h = sl_copy.get("heading", "").strip()
-                if h in seen_headings:
-                    sl_copy["heading"] = f"{h} (Part 2)"
-                seen_headings.add(h)
-                fixed_slides.append(sl_copy)
+        # Turn 6: Self-correction. Only runs when the audit found something it can
+        # fix on its own (a heading that repeats an earlier slide). Everything else is
+        # left to the review panel rather than guessed at here.
+        repaired = 0
+        dup_slides = [n for n in (audit_res.get("duplicate_heading_slides") or []) if 1 <= n <= len(slides)]
+        if dup_slides and turn <= self.max_turns:
+            t6_thought = f"Repair {len(dup_slides)} slide heading(s) that repeat an earlier slide, then re-audit."
+            fixed_slides = [dict(sl) for sl in slides]
+            for n in dup_slides:
+                sl = fixed_slides[n - 1]
+                sl["heading"] = self._distinct_heading(sl, n)
+                repaired += 1
             model["slides"] = fixed_slides
-            self.execute_turn(
+            res_fix = self.execute_turn(
                 turn=turn,
                 thought=t6_thought,
                 tool_name="audit_and_fix_slides",
                 tool_args={"slides": fixed_slides},
+            )
+            if res_fix.success and isinstance(res_fix.data, dict):
+                issue_count = int(res_fix.data.get("issue_count", issue_count))
+            self.working_memory.update_plan_step(
+                "audit", "completed",
+                f"Repaired {repaired} heading(s); {issue_count} issue(s) left for review",
             )
             turn += 1
 
@@ -548,6 +574,8 @@ class AgentHarness:
         receipt = self.checkpoint_memory.get_receipt()
         receipt["total_duration_sec"] = round(time.time() - start_time, 2)
         receipt["plan"] = [s.to_dict() for s in self.working_memory.plan]
+        receipt["repaired"] = repaired
+        receipt["max_turns"] = self.max_turns
 
         log.bind(task="agent_harness").success(
             f"Agent completed {len(receipt['steps'])} turns in {receipt['total_duration_sec']}s. Deck slides: {len(model.get('slides', []))}"

@@ -26,6 +26,91 @@ from __future__ import annotations
 
 import re
 
+from .edu_families_extra import (
+    EXTRA_BODY_WEIGHT,
+    EXTRA_FAMILY_INFO,
+    EXTRA_FAMILY_MAP,
+    EXTRA_FONTS,
+    build_css as _extra_css,
+)
+
+# Style key -> design family. Keys not listed are spread by hash so every
+# style still lands on a distinct-feeling layout. This is the single source of
+# truth: the renderer, the style picker and the admin preview all read it.
+_BASE_FAMILY_MAP = {
+    "sketch": ("whiteboard", "playful", "teardown", "folk_freq", "chalk"),
+    "notebook": ("tutorial", "explainer", "notion", "slides", "agenda", "minimal"),
+    "split": ("editorial", "documentary", "keynote", "pitch", "corporate", "geo_navy",
+              "coral_split", "split_media", "proof_duo", "swiss_pulse", "velvet_std"),
+    "band": ("broadcast", "lower_third", "saas", "process", "timeline_rail", "kpi_strip",
+             "device", "glass", "modern", "terminal", "blueprint"),
+    "poster": ("bold", "kinetic", "kinetic_center", "big_stat", "quote_pull", "cinematic",
+               "neon", "maximalist", "promo_sprint", "caption_pop", "hybrid_kinetic", "deconstructed"),
+    "bento": ("bento", "cards", "dataviz", "mosaic", "stack_cards", "gamma", "hybrid_data",
+              "chart_race", "blush_soft", "hybrid", "hybrid_story", "data_drift", "soft_signal"),
+}
+# New families first: a style listed there wins over the original six.
+EDU_FAMILY_MAP = {**EXTRA_FAMILY_MAP, **_BASE_FAMILY_MAP}
+# Picker order: teaching -> editorial -> business -> bold/story -> dev.
+EDU_FAMILIES = ("sketch", "notebook", "chalk", "split", "magazine", "band", "glass", "bento",
+                "poster", "pop", "cinema", "terminal")
+
+# What the UI shows for each family (order = picker order).
+FAMILY_INFO = {
+    "sketch": {
+        "label": "Whiteboard",
+        "blurb": "Hand-drawn: dotted paper, wobbly outlines, underlines and doodles that draw themselves.",
+        "uses": "Explaining, maths, step-by-step teaching",
+        "flagship": "whiteboard",
+    },
+    "notebook": {
+        "label": "Notebook",
+        "blurb": "Ruled paper with a margin line, a marker that sweeps the point being spoken, checkbox lines.",
+        "uses": "Revision, tutorials, how-tos",
+        "flagship": "tutorial",
+    },
+    "split": {
+        "label": "Editorial",
+        "blurb": "Two columns: a title rail on the side and hairline-ruled content, in a serif voice.",
+        "uses": "Essays, papers, documentary-style lessons",
+        "flagship": "editorial",
+    },
+    "band": {
+        "label": "Broadcast",
+        "blurb": "A title band across the top, accent-topped cards, diagonal hatch. Reads like a news explainer.",
+        "uses": "Product demos, processes, timelines",
+        "flagship": "broadcast",
+    },
+    "poster": {
+        "label": "Poster",
+        "blurb": "Huge condensed type, ink-black cards with hard offset shadows. Built for vertical video.",
+        "uses": "Shorts, Reels, big claims and stats",
+        "flagship": "bold",
+    },
+    "bento": {
+        "label": "Bento",
+        "blurb": "A mosaic of rounded tiles that fills the whole frame, so dense content still looks tidy.",
+        "uses": "Dashboards, comparisons, data-rich chapters",
+        "flagship": "bento",
+    },
+}
+FAMILY_INFO.update(EXTRA_FAMILY_INFO)
+# Re-order to the picker order.
+FAMILY_INFO = {k: FAMILY_INFO[k] for k in EDU_FAMILIES}
+
+
+def edu_family(style_key: str) -> tuple[str, int]:
+    """(family, font variant 0-3) for a style key."""
+    import zlib
+
+    key = str(style_key or "hybrid").strip().lower()
+    for fam, keys in EDU_FAMILY_MAP.items():
+        if key in keys:
+            return fam, zlib.crc32(key.encode()) % 4
+    h = zlib.crc32(key.encode())
+    return EDU_FAMILIES[h % len(EDU_FAMILIES)], (h >> 3) % 4
+
+
 # (heading font, heading weight, body font)
 _FONTS = {
     "split": [("Fraunces", 700, "DM Sans"), ("Playfair Display", 700, "Inter"),
@@ -41,7 +126,8 @@ _FONTS = {
     "notebook": [("Permanent Marker", 400, "Patrick Hand"), ("Caveat", 700, "Kalam"),
                  ("Kalam", 700, "Nunito"), ("Gloria Hallelujah", 400, "Patrick Hand")],
 }
-_BODY_WEIGHT = {"sketch": 400, "notebook": 400, "poster": 600}
+_FONTS.update(EXTRA_FONTS)
+_BODY_WEIGHT = {"sketch": 400, "notebook": 400, "poster": 600, **EXTRA_BODY_WEIGHT}
 
 
 def _font_css() -> str:
@@ -422,9 +508,9 @@ EDU_CSS = (
     "\n/* ===== design families ===== */\n"
     + _important(_font_css(), "")
     + "\n"
-    + _important(_RAW, _P)
+    + _important(_RAW + _extra_css(), _P)
     + "\n"
-    + _KEYFRAMES
+    + _KEYFRAMES.replace("@@", _P)
 )
 
 # Grow-or-shrink to fit. Picks the largest --fit (0.5 .. FIT_MAX) at which the
@@ -475,3 +561,10 @@ EDU_FIT_JS = r"""
     document.body.classList.remove('measuring');
   }
 """
+
+
+def font_pair(style_key: str) -> tuple[str, str]:
+    """(heading font, body font) the renderer uses for this style."""
+    fam, var = edu_family(style_key)
+    hf, _hw, bf = _FONTS[fam][var]
+    return hf, bf

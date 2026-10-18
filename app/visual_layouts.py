@@ -1390,9 +1390,11 @@ CATEGORY_KEY_OVERRIDES: dict[str, str] = {
     "hybrid_story": "story",
 }
 
-# Six palettes only — old keys still resolve via aliases.
+# Curated palettes (old keys still resolve via aliases). The first six are the
+# originals; the rest are the added light and dark options.
 CURATED_THEME_KEYS: tuple[str, ...] = (
     "aurora", "midnight", "sunset", "snow", "emerald", "cyber",
+    "ocean", "forest", "rose", "citrus", "grape", "graphite", "sand", "sky",
 )
 THEME_ALIASES: dict[str, str] = {
     "paper": "snow",

@@ -1469,6 +1469,25 @@ def video_formats() -> dict:
     return payload
 
 
+@app.get("/api/style-preview", response_class=HTMLResponse)
+def style_preview(
+    style: str = "whiteboard", theme: str = "snow", fmt: str = "youtube_video",
+) -> HTMLResponse:
+    """Real render of a sample lesson in this style, for the picker preview.
+
+    Same ``render_slideshow_html`` the video pipeline films, so the picker and
+    the finished video cannot drift apart.
+    """
+    from .pipeline.sample_deck import render_sample
+
+    try:
+        html = render_sample(style, theme, fmt)
+    except Exception:
+        log.bind(task="style-preview").exception("sample render failed")
+        return HTMLResponse("<p>Preview unavailable.</p>", status_code=500)
+    return HTMLResponse(html, headers={"Cache-Control": "public, max-age=300"})
+
+
 @app.get("/api/audience")
 def audience_catalog() -> dict:
     """Age groups, knowledge levels, and the custom prompts they load."""
@@ -1867,6 +1886,8 @@ def get_agent_tools(request: Request) -> dict:
     from .agent_memory import get_harness_memory
     from .pipeline.agent_harness import AgentHarness
 
+    from . import firestore_sync
+
     harness = AgentHarness(session_id="catalog_inspector")
     mem = get_harness_memory()
     return {
@@ -1874,6 +1895,8 @@ def get_agent_tools(request: Request) -> dict:
         "max_turns": harness.max_turns,
         "memory_count": mem.count(),
         "memory_namespaces": mem.list_namespaces(),
+        "memory_backend": mem.backend(),
+        "storage": firestore_sync.status(),
     }
 
 

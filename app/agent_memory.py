@@ -3,8 +3,10 @@
 Provides three memory tiers following 2026 agent harness engineering standards:
   1. Working Memory: Ephemeral scratchpad, active plan checklist, and turn context.
   2. Checkpoint Memory: Episodic execution trace with run receipts and JSONL audit logging.
-  3. Long-Term Semantic Memory: Persistent SQLite storage with namespacing, keyword/tag recall,
-     and cross-session knowledge persistence (preferences, style rules, domain knowledge, feedback).
+  3. Long-Term Semantic Memory: namespaced, keyword/tag recall, persistent across sessions
+     (preferences, style rules, domain knowledge, feedback). SQLite on disk is the working copy;
+     on Cloud Run (or with Firestore credentials) every write is mirrored to Firestore and
+     read back on start-up, so what the agent learned survives a container restart.
 """
 from __future__ import annotations
 
@@ -201,6 +203,74 @@ class HarnessMemory:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_tags ON agent_memories(tags)")
             conn.commit()
             self._seed_default_memories(conn)
+        self._hydrate_from_remote()
+
+    # ---- Firestore mirror (hosted) --------------------------------------
+    def backend(self) -> str:
+        """``"firestore"`` or ``"sqlite"`` - where memory is persisted right now."""
+        try:
+            from . import firestore_sync
+
+            return firestore_sync.store_for("memory")
+        except Exception:  # noqa: BLE001
+            return "sqlite"
+
+    @staticmethod
+    def _doc_id(namespace: str, key: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", f"{namespace}__{key}")[:300]
+
+    def _mirror(self, namespace: str, key: str, value: str, tags: str, meta: str, now: float) -> None:
+        if self.backend() != "firestore":
+            return
+        try:
+            from . import firestore_sync
+
+            firestore_sync.put_doc(
+                firestore_sync.memory_collection(),
+                self._doc_id(namespace, key),
+                {"namespace": namespace, "key": key, "value": value, "tags": tags,
+                 "metadata": meta, "updated_at": now},
+            )
+        except Exception as e:  # noqa: BLE001
+            log.bind(task="agent").warning(f"memory mirror skipped: {e}")
+
+    def _hydrate_from_remote(self) -> None:
+        """Pull memories saved by earlier containers into the local SQLite copy."""
+        if self.backend() != "firestore":
+            return
+        try:
+            from . import firestore_sync
+
+            docs = firestore_sync.fetch_all(firestore_sync.memory_collection(), limit=2000)
+            if not docs:
+                return
+            with self._lock:
+                conn = self._get_conn()
+                for d in docs:
+                    ns, key = d.get("namespace"), d.get("key")
+                    if not ns or not key:
+                        continue
+                    remote_ts = float(d.get("updated_at") or 0)
+                    row = conn.execute(
+                        "SELECT updated_at FROM agent_memories WHERE namespace = ? AND key = ?", (ns, key)
+                    ).fetchone()
+                    if row and float(row["updated_at"] or 0) >= remote_ts:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO agent_memories (namespace, key, value, tags, metadata, created_at, updated_at, access_count)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                        ON CONFLICT(namespace, key) DO UPDATE SET
+                            value = excluded.value, tags = excluded.tags,
+                            metadata = excluded.metadata, updated_at = excluded.updated_at
+                        """,
+                        (ns, key, str(d.get("value") or ""), str(d.get("tags") or ""),
+                         str(d.get("metadata") or "{}"), remote_ts or time.time(), remote_ts or time.time()),
+                    )
+                conn.commit()
+            log.bind(task="agent").info(f"agent memory: restored {len(docs)} item(s) from Firestore")
+        except Exception as e:  # noqa: BLE001
+            log.bind(task="agent").warning(f"memory restore skipped: {e}")
 
     def _seed_default_memories(self, conn: sqlite3.Connection) -> None:
         """Seed initial knowledge guidelines if table is empty."""
@@ -315,6 +385,7 @@ class HarnessMemory:
                 (namespace, key, val_str, tags.lower(), meta_str, now, now),
             )
             conn.commit()
+        self._mirror(namespace, key, val_str, tags.lower(), meta_str, now)
 
     def get(self, key: str, namespace: str = "general") -> Optional[Any]:
         """Fetch a specific memory item by key and namespace."""

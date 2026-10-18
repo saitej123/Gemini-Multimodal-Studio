@@ -197,8 +197,8 @@
                 <i class="opts-chevron" data-lucide="chevron-down"></i>
               </summary>
               <div class="opts-body">
-                <p class="format-desc visual-design-lead">Each layout is a unique HTML frame with its own typeface. Group by Teach, Motion, HyperFrames, Decks, Story, Data, or Code. Admin preview shows one frame per layout family (treemap, orbit, cascade, and the rest). Colors are six palettes on the strip.</p>
-                <div class="visual-style-filters" id="visual-style-filters" role="tablist" aria-label="Layout groups"></div>
+                <p class="format-desc visual-design-lead">Twelve templates, each built differently, with its own layout, font pair and way of moving: Whiteboard, Notebook, Chalkboard, Editorial, Magazine, Broadcast, Glass, Bento, Poster, Pop, Cinema and Terminal. Pick a colour on the strip.</p>
+                <div class="visual-style-filters" id="visual-style-filters" role="tablist" aria-label="Templates"></div>
                 <div class="visual-preset-grid" id="visual-preset-grid"></div>
                 <div class="visual-color-strip" id="visual-color-strip" hidden>
                   <div class="visual-color-label"><i data-lucide="palette"></i> Colors</div>
@@ -916,13 +916,13 @@
       <div class="admin-panel hidden" id="admin-panel-visual">
         <div class="admin-panel-head">
           <div class="admin-panel-title">Visual styles
-            <span class="sub">Same catalog as Studio, Present, and Cron. Each layout opens on its own family, then you can step through the other nine. Fonts follow the group (Teach, Motion, HyperFrames, Decks, Story, Data, Code). Six palettes on the strip — never a color-clone layout.</span>
+            <span class="sub">Same catalog as Studio, Present, and Cron. The stage on the right is a real render of a sample lesson, made by the same code that films the video, so what you see here is what the MP4 will look like. Use Next to step through seven sample slides.</span>
           </div>
         </div>
         <div class="visual-styles-layout">
           <div class="visual-styles-picker">
-            <div class="voice-subhead"><i data-lucide="clapperboard"></i> Layout groups</div>
-            <div class="visual-style-filters" id="admin-visual-style-filters" role="tablist" aria-label="Layout groups"></div>
+            <div class="voice-subhead"><i data-lucide="clapperboard"></i> Templates</div>
+            <div class="visual-style-filters" id="admin-visual-style-filters" role="tablist" aria-label="Templates"></div>
             <div class="style-grid visual-preset-admin-grid" id="admin-style-grid"></div>
             <div class="visual-color-strip" id="admin-visual-color-strip" hidden>
               <div class="visual-color-label"><i data-lucide="palette"></i> Colors</div>
@@ -1099,7 +1099,7 @@
       <!-- Costs panel -->
       <div class="admin-panel hidden" id="admin-panel-costs">
         <div class="admin-panel-head">
-          <div class="admin-panel-title">Cost tracker</div>
+          <div class="admin-panel-title">Cost tracker <span class="sub" id="cost-storage-line"></span></div>
           <div class="cost-controls">
             <select class="cost-range" id="cost-range">
               <option value="7">Last 7 days</option>
@@ -1146,7 +1146,7 @@
       <div class="admin-panel hidden" id="admin-panel-harness">
         <div class="admin-panel-head">
           <div class="admin-panel-title">Agent Harness &amp; Memory Explorer
-            <span class="sub">Autonomous ReAct Controller &middot; 8 Schema-Validated Tools &middot; 3-Tier Layered Memory (Working, Checkpoints, SQLite WAL)</span>
+            <span class="sub" id="harness-subtitle">Bounded ReAct controller &middot; schema-validated tools &middot; layered memory</span>
           </div>
           <div class="admin-panel-actions">
             <button class="btn-sm" id="harness-refresh"><i data-lucide="refresh-cw"></i> Refresh</button>
@@ -1157,30 +1157,35 @@
         <div class="harness-stats-grid">
           <div class="harness-stat-card">
             <div class="harness-stat-header"><i data-lucide="bot"></i> ReAct Controller</div>
-            <div class="harness-stat-val" id="harness-status-val">7 Bounded Turns</div>
-            <div class="harness-stat-desc">Plan ➔ Tool ➔ Observe ➔ Self-Correction</div>
+            <div class="harness-stat-val" id="harness-status-val">&hellip;</div>
+            <div class="harness-stat-desc">Plan ➔ Tool ➔ Observe ➔ Self-correct</div>
           </div>
           <div class="harness-stat-card">
             <div class="harness-stat-header"><i data-lucide="wrench"></i> Tool Registry</div>
-            <div class="harness-stat-val" id="harness-tools-val">8 Registered Tools</div>
-            <div class="harness-stat-desc">Strict parameter schemas &amp; sandboxed dispatch</div>
+            <div class="harness-stat-val" id="harness-tools-val">&hellip;</div>
+            <div class="harness-stat-desc" id="harness-tools-desc">Strict parameter schemas &amp; sandboxed dispatch</div>
           </div>
           <div class="harness-stat-card">
             <div class="harness-stat-header"><i data-lucide="database"></i> 3-Tier Memory</div>
-            <div class="harness-stat-val" id="harness-memory-val">Persistent SQLite</div>
-            <div class="harness-stat-desc">Working Memory &middot; Checkpoint Traces &middot; Long-term WAL</div>
+            <div class="harness-stat-val" id="harness-memory-val">&hellip;</div>
+            <div class="harness-stat-desc" id="harness-memory-desc">Working memory &middot; checkpoint traces &middot; long-term store</div>
           </div>
           <div class="harness-stat-card">
             <div class="harness-stat-header"><i data-lucide="shield-check"></i> Quality &amp; Sync Audit</div>
-            <div class="harness-stat-val">Pre-Render Guard</div>
-            <div class="harness-stat-desc">Duplicate headings &middot; visual repetition &middot; voice-sync drift</div>
+            <div class="harness-stat-val" id="harness-audit-val">&hellip;</div>
+            <div class="harness-stat-desc" id="harness-audit-desc">Checked before every render</div>
+          </div>
+          <div class="harness-stat-card" id="harness-storage-card">
+            <div class="harness-stat-header"><i data-lucide="cloud"></i> Firebase &amp; storage</div>
+            <div class="harness-stat-val" id="harness-storage-val">&hellip;</div>
+            <div class="harness-stat-desc" id="harness-storage-desc">Where jobs, costs and memory are saved</div>
           </div>
         </div>
 
         <!-- Subtabs: Memory Explorer, Tool Registry, Execution Traces -->
         <div class="harness-subtabs">
           <button type="button" class="harness-tab active" data-harness-tab="memory"><i data-lucide="database"></i> Persistent Memory Store</button>
-          <button type="button" class="harness-tab" data-harness-tab="tools"><i data-lucide="wrench"></i> 8-Tool Registry Catalog</button>
+          <button type="button" class="harness-tab" data-harness-tab="tools"><i data-lucide="wrench"></i> Tool Registry <span id="harness-tools-tab-count"></span></button>
           <button type="button" class="harness-tab" data-harness-tab="trace"><i data-lucide="activity"></i> Recent Execution Traces</button>
         </div>
 

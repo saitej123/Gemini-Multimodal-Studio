@@ -122,32 +122,12 @@ _DECOS = (
     '</div>'
 )
 
-# Design families. Style key -> family; the rest are spread by hash so every
-# style still lands on a distinct-feeling layout.
-_EDU_FAMILY_MAP = {
-    "sketch": ("whiteboard", "playful", "teardown", "folk_freq", "chalk"),
-    "notebook": ("tutorial", "explainer", "notion", "slides", "agenda", "minimal"),
-    "split": ("editorial", "documentary", "keynote", "pitch", "corporate", "geo_navy",
-              "coral_split", "split_media", "proof_duo", "swiss_pulse", "velvet_std"),
-    "band": ("broadcast", "lower_third", "saas", "process", "timeline_rail", "kpi_strip",
-             "device", "glass", "modern", "terminal", "blueprint"),
-    "poster": ("bold", "kinetic", "kinetic_center", "big_stat", "quote_pull", "cinematic",
-               "neon", "maximalist", "promo_sprint", "caption_pop", "hybrid_kinetic", "deconstructed"),
-    "bento": ("bento", "cards", "dataviz", "mosaic", "stack_cards", "gamma", "hybrid_data",
-              "chart_race", "blush_soft", "hybrid", "hybrid_story", "data_drift", "soft_signal"),
-}
-_EDU_FAMILIES = ("split", "band", "sketch", "poster", "bento", "notebook")
-
-
-def _edu_family(style_key: str) -> tuple[str, int]:
-    import zlib
-
-    key = str(style_key or "hybrid").strip().lower()
-    for fam, keys in _EDU_FAMILY_MAP.items():
-        if key in keys:
-            return fam, zlib.crc32(key.encode()) % 4
-    h = zlib.crc32(key.encode())
-    return _EDU_FAMILIES[h % len(_EDU_FAMILIES)], (h >> 3) % 4
+# Design families live in edu_theme (shared with the style picker).
+from .edu_theme import (  # noqa: E402
+    EDU_FAMILIES as _EDU_FAMILIES,
+    EDU_FAMILY_MAP as _EDU_FAMILY_MAP,
+    edu_family as _edu_family,
+)
 
 
 def _accent_heading(heading: str) -> str:
@@ -1691,6 +1671,13 @@ def _slim_receipt(receipt: dict | None) -> dict:
         "has_errors": bool(r.get("has_errors")),
         "total_elapsed_ms": r.get("total_elapsed_ms"),
         "total_duration_sec": r.get("total_duration_sec"),
+        "repaired": r.get("repaired", 0),
+        "max_turns": r.get("max_turns"),
+        "plan": [
+            {"id": p.get("id"), "description": p.get("description"), "status": p.get("status"),
+             "result_summary": str(p.get("result_summary") or "")[:200]}
+            for p in (r.get("plan") or []) if isinstance(p, dict)
+        ],
         "steps": steps,
     }
 
@@ -2949,7 +2936,7 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;600;700;800&family=Baloo+2:wght@500;600;700&family=Barlow:wght@500;600;700;800&family=Bricolage+Grotesque:wght@500;600;700;800&family=Caveat:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Figtree:wght@500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital,wght@0,400;1,400&family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,700;1,7..72,500&family=Manrope:wght@500;600;700;800&family=Montserrat:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Nunito:wght@500;600;700;800&family=Oswald:wght@500;600;700&family=Outfit:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Poppins:wght@500;600;700;800&family=Rubik:wght@500;600;700;800&family=Sora:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&family=Syne:wght@500;600;700;800&family=Work+Sans:wght@500;600;700;800&family=Kalam:wght@400;700&family=Patrick+Hand&family=Permanent+Marker&family=Gloria+Hallelujah&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;600;700;800&family=Baloo+2:wght@500;600;700&family=Barlow:wght@500;600;700;800&family=Bricolage+Grotesque:wght@500;600;700;800&family=Caveat:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Figtree:wght@500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital,wght@0,400;1,400&family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,700;1,7..72,500&family=Manrope:wght@500;600;700;800&family=Montserrat:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Nunito:wght@500;600;700;800&family=Oswald:wght@500;600;700&family=Outfit:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Poppins:wght@500;600;700;800&family=Rubik:wght@500;600;700;800&family=Sora:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&family=Syne:wght@500;600;700;800&family=Work+Sans:wght@500;600;700;800&family=Kalam:wght@400;700&family=Patrick+Hand&family=Permanent+Marker&family=Gloria+Hallelujah&family=Bangers&family=Lora:wght@500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
@@ -4417,6 +4404,13 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     outBack: (t) => {{ const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }},
     outCubic: (t) => 1 - Math.pow(1 - t, 3),
     inOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+    outBounce: (t) => {{
+      const n1 = 7.5625, d1 = 2.75;
+      if (t < 1 / d1) return n1 * t * t;
+      if (t < 2 / d1) {{ t -= 1.5 / d1; return n1 * t * t + 0.75; }}
+      if (t < 2.5 / d1) {{ t -= 2.25 / d1; return n1 * t * t + 0.9375; }}
+      t -= 2.625 / d1; return n1 * t * t + 0.984375;
+    }},
     linear: (t) => t,
   }};
   function interpolate(frame, inRange, outRange, ease) {{
@@ -4483,8 +4477,27 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     // Each design family has its own motion language, so templates differ in
     // how they move as well as how they look.
     const FAM = document.body.dataset.edu || '';
-    const CARD_KIND = ({{ sketch: 'tilt', poster: 'slide', bento: 'pop', split: 'rise', band: 'drop', notebook: 'tilt' }})[FAM] || 'card';
-    const TITLE_KIND = ({{ sketch: 'tilt', poster: 'slide', band: 'slide', split: 'riseBlur', bento: 'drop', notebook: 'riseBlur' }})[FAM] || 'riseBlur';
+    // One motion set per family, and a different one for each of the three slide
+    // layouts (data-alt), so a deck never moves the same way slide after slide.
+    const ALT = Math.max(0, Math.min(2, parseInt(slide.dataset.alt || '0', 10) || 0));
+    const CARD_SET = {{
+      sketch: ['tilt', 'swing', 'bounce'], notebook: ['tilt', 'rise', 'glide'],
+      chalk: ['swing', 'tilt', 'bounce'], split: ['rise', 'glide', 'riseBlur'],
+      magazine: ['glide', 'rise', 'slide'], band: ['drop', 'slide', 'rise'],
+      glass: ['flip', 'zoom', 'pop'], bento: ['pop', 'zoom', 'flip'],
+      poster: ['slide', 'stamp', 'drop'], pop: ['stamp', 'bounce', 'swing'],
+      cinema: ['zoom', 'riseBlur', 'glide'], terminal: ['type', 'slide', 'type'],
+    }};
+    const TITLE_SET = {{
+      sketch: ['tilt', 'riseBlur', 'tilt'], notebook: ['riseBlur', 'tilt', 'riseBlur'],
+      chalk: ['riseBlur', 'swing', 'riseBlur'], split: ['riseBlur', 'rise', 'glide'],
+      magazine: ['slide', 'riseBlur', 'drop'], band: ['slide', 'drop', 'rise'],
+      glass: ['rise', 'zoom', 'riseBlur'], bento: ['drop', 'pop', 'rise'],
+      poster: ['slide', 'stamp', 'drop'], pop: ['stamp', 'bounce', 'stamp'],
+      cinema: ['zoom', 'riseBlur', 'zoom'], terminal: ['type', 'type', 'slide'],
+    }};
+    const CARD_KIND = (CARD_SET[FAM] || [])[ALT] || 'card';
+    const TITLE_KIND = (TITLE_SET[FAM] || [])[ALT] || 'riseBlur';
     groups.forEach((g) => {{
       if (g.kind === 'card') g.kind = CARD_KIND;
       if (g.sel === 'h2') g.kind = TITLE_KIND;
@@ -4579,6 +4592,40 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     }} else if (t.kind === 'drop') {{
       const y = interpolate(frame, [f0, f1], [-70, 0], easings.outBack);
       transform = `translateY(${{y}}px)`;
+    }} else if (t.kind === 'stamp') {{
+      // Stamped onto the page: big and tilted, slams down with a little overshoot.
+      const k = interpolate(frame, [f0, f1], [0, 1], easings.outBack);
+      const s = 1.7 - 0.7 * k;
+      const r = -7 * (1 - k);
+      transform = `scale(${{s}}) rotate(${{r}}deg)`;
+    }} else if (t.kind === 'zoom') {{
+      // Slow cinematic push-in with the blur clearing.
+      const s = interpolate(frame, [f0, f1], [1.16, 1], easings.outCubic);
+      const b = interpolate(frame, [f0, f1], [10, 0], easings.outCubic);
+      transform = `scale(${{s}})`; filter = `blur(${{b}}px)`;
+    }} else if (t.kind === 'flip') {{
+      // Card flips up from the table.
+      const r = interpolate(frame, [f0, f1], [-72, 0], easings.outBack);
+      const y = interpolate(frame, [f0, f1], [24, 0], easings.outExpo);
+      transform = `perspective(900px) translateY(${{y}}px) rotateX(${{r}}deg)`;
+    }} else if (t.kind === 'swing') {{
+      // Hangs from a corner and swings to rest.
+      const r = interpolate(frame, [f0, f1], [14, 0], easings.outBounce);
+      const y = interpolate(frame, [f0, f1], [-40, 0], easings.outExpo);
+      transform = `translateY(${{y}}px) rotate(${{r}}deg)`;
+    }} else if (t.kind === 'bounce') {{
+      // Drops from above and bounces.
+      const y = interpolate(frame, [f0, f1], [-120, 0], easings.outBounce);
+      transform = `translateY(${{y}}px)`;
+    }} else if (t.kind === 'glide') {{
+      // Long, calm slide in from the right.
+      const x = interpolate(frame, [f0, f1], [90, 0], easings.outExpo);
+      const b = interpolate(frame, [f0, f1], [6, 0], easings.outCubic);
+      transform = `translateX(${{x}}px)`; filter = `blur(${{b}}px)`;
+    }} else if (t.kind === 'type') {{
+      // Typed in from the left: a clip reveal, no squashing of the text.
+      const w = interpolate(frame, [f0, f1], [0, 100], easings.outCubic);
+      t.el.style.clipPath = `inset(-8px ${{100 - w}}% -8px -8px)`;
     }} else if (t.kind === 'lxfly') {{
       const pose = lxPose(t, frame, f0, f1);
       transform = pose.transform; filter = pose.filter;
@@ -4614,6 +4661,7 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
       }}
       t.el.style.filter = '';
       t.el.style.opacity = '1';
+      if (t.kind === 'type') t.el.style.clipPath = '';
       if (t.kind === 'bar') {{
         const fill = t.el.querySelector('.bar-fill');
         if (fill) {{

@@ -1,21 +1,24 @@
 """LLM / paid-API cost tracking (admin only).
 
 Every LLM or paid-API call records a usage event: which provider/model, how
-many prompt/response tokens (estimated when the provider doesn't report them),
-and an estimated dollar cost derived from configurable per-model rates. Local
-providers (Ollama) are free and record $0.
+many prompt/response tokens (the provider's own count when it reports one,
+otherwise an estimate), and an estimated dollar cost from per-model rates.
 
-The data lives in the shared SQLite database (``usage_events`` table) so it
-survives restarts. The admin dashboard aggregates it into a cost report.
+Where the events live depends on where the app runs (``COST_STORE``, default auto):
+
+  * hosted (Cloud Run)  -> Cloud Firestore, ``studio_usage`` collection. The
+    container disk is wiped on every restart, so SQLite alone would lose the lot.
+  * local run           -> the SQLite file ``workspace/sessions.db`` (or Firestore
+    too, if you have credentials configured).
+
+Events are always also written to the local SQLite table as a cache, and the
+report falls back to it if Firestore cannot be read.
 
 Design notes:
-  * Never raises into the caller — a tracking failure must not break generation.
-  * Token counts are best-effort: if a provider returns real usage we use it,
-    otherwise we estimate ~4 chars/token on the prompt + output text.
-  * Rates are per 1M tokens and come from ``settings`` (overridable via .env),
-    with sensible built-in defaults for common cloud models.
-  * Reports recompute $ from current rates so older rows stored at $0 (unknown
-    model at the time) still show a useful estimate after rate tables update.
+  * Never raises into the caller - a tracking failure must not break generation.
+  * Rates are per 1M tokens, overridable via ``settings`` (``.env``).
+  * Reports recompute $ from the current rates, so rows stored at $0 (unknown
+    model at the time) still show a useful estimate after the rate table updates.
 """
 from __future__ import annotations
 
@@ -23,6 +26,8 @@ import contextvars
 import json
 import re
 import time
+import uuid
+from functools import wraps
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -47,6 +52,24 @@ def job_context(job_id: str) -> Iterator[None]:
         yield
     finally:
         _current_job_id.reset(token)
+
+def bind_context(fn):
+    """Wrap ``fn`` so it runs inside the *current* context.
+
+    Thread pools do not inherit context variables, so usage from parallel slide
+    or voice calls lost its job id and never showed under "By job". Wrap the
+    callable on the submitting thread: ``pool.submit(costs.bind_context(fn), x)``.
+    """
+    snapshot = contextvars.copy_context()
+
+    @wraps(fn)
+    def _run(*args, **kwargs):
+        # A Context can only be entered by one thread at a time, so each call
+        # runs in its own copy of the snapshot.
+        return snapshot.copy().run(fn, *args, **kwargs)
+
+    return _run
+
 
 # Built-in default rates (USD per 1M tokens): (input_rate, output_rate).
 # Admins can override any of these via .env (see config.cost_rates).
@@ -259,8 +282,8 @@ def record(
     """Record one usage event. Never raises.
 
     ``in_tokens``/``out_tokens`` are used when known; otherwise estimated from
-    ``prompt``/``output`` length. Local providers (ollama) always cost $0.
-    ``job_id`` defaults to the active :func:`job_context` when omitted.
+    ``prompt``/``output`` length. ``job_id`` defaults to the active
+    :func:`job_context` when omitted.
     """
     try:
         _ensure_schema()
@@ -270,59 +293,38 @@ def record(
             provider=provider, model=model, kind=kind, in_tokens=it, out_tokens=ot
         )
         jid = (job_id or get_job_id() or "").strip()
+        ts = time.time()
         conn = _connect()
         with _lock:
             conn.execute(
                 "INSERT INTO usage_events (ts, provider, model, kind, in_tokens, out_tokens, cost_usd, job_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (time.time(), provider, model, kind, it, ot, cost, jid),
+                (ts, provider, model, kind, it, ot, cost, jid),
             )
             conn.commit()
-    except Exception as e:  # noqa: BLE001 — tracking must never break a run
+        _mirror_remote(
+            {
+                "id": uuid.uuid4().hex, "ts": ts, "provider": provider, "model": model,
+                "kind": kind, "in_tokens": it, "out_tokens": ot, "cost_usd": cost, "job_id": jid,
+            }
+        )
+    except Exception as e:  # noqa: BLE001 - tracking must never break a run
         log.bind(task="cost").warning(f"usage record failed (ignored): {e}")
 
 
-def backfill_costs() -> int:
-    """Recompute ``cost_usd`` for all rows using current rate tables.
-
-    Returns the number of rows updated. Safe to call from the report endpoint
-    so the admin UI reflects new Gemini 3.x rates even for past usage.
-    """
+def _mirror_remote(doc: dict) -> None:
+    """Queue the event for Firestore when that is where costs are stored."""
     try:
-        _ensure_schema()
-        conn = _connect()
-        with _lock:
-            rows = conn.execute(
-                "SELECT id, provider, model, kind, in_tokens, out_tokens, cost_usd "
-                "FROM usage_events"
-            ).fetchall()
-            updated = 0
-            for r in rows:
-                new_cost = estimate_cost(
-                    provider=r["provider"] or "",
-                    model=r["model"] or "",
-                    kind=r["kind"] or "text",
-                    in_tokens=r["in_tokens"] or 0,
-                    out_tokens=r["out_tokens"] or 0,
-                )
-                old = float(r["cost_usd"] or 0.0)
-                if abs(old - new_cost) > 1e-9:
-                    conn.execute(
-                        "UPDATE usage_events SET cost_usd = ? WHERE id = ?",
-                        (new_cost, r["id"]),
-                    )
-                    updated += 1
-            if updated:
-                conn.commit()
-                log.bind(task="cost").info(f"backfilled cost on {updated} usage row(s)")
-            return updated
+        from . import firestore_sync
+
+        if firestore_sync.store_for("costs") == "firestore":
+            firestore_sync.queue_usage(doc)
     except Exception as e:  # noqa: BLE001
-        log.bind(task="cost").warning(f"cost backfill failed: {e}")
-        return 0
+        log.bind(task="cost").warning(f"usage mirror skipped: {e}")
 
 
 def _job_labels(job_ids: list[str]) -> dict[str, dict]:
-    """Map job_id -> {title, filename, status} from the jobs table."""
+    """Map job_id -> {title, filename, status} from the jobs table (or Firestore)."""
     ids = [j for j in job_ids if j]
     if not ids:
         return {}
@@ -369,138 +371,170 @@ def _job_labels(job_ids: list[str]) -> dict[str, dict]:
             }
     except Exception as e:  # noqa: BLE001
         log.bind(task="cost").warning(f"job label lookup failed: {e}")
+    # Hosted: the job row is gone after a restart, but Firestore still has it.
+    missing = [j for j in real_ids if j not in out]
+    if missing:
+        try:
+            from . import firestore_sync
+
+            for jid in missing[:60]:
+                doc = firestore_sync.get_job(jid)
+                if doc:
+                    out[jid] = {
+                        "title": (doc.get("title") or doc.get("filename") or jid).strip(),
+                        "filename": doc.get("filename") or "",
+                        "status": doc.get("status") or "",
+                    }
+        except Exception as e:  # noqa: BLE001
+            log.bind(task="cost").warning(f"firestore job label lookup failed: {e}")
     return out
+
+
+_EVENT_KEYS = ("ts", "provider", "model", "kind", "in_tokens", "out_tokens", "cost_usd", "job_id")
+
+
+def _load_events(since: float) -> tuple[list[dict], str]:
+    """(events since ``since``, backend actually read). Firestore first when it is the store."""
+    try:
+        from . import firestore_sync
+
+        if firestore_sync.store_for("costs") == "firestore":
+            firestore_sync.flush_usage()
+            docs = firestore_sync.query_since(firestore_sync.usage_collection(), "ts", since)
+            return [{k: d.get(k) for k in _EVENT_KEYS} for d in docs], "firestore"
+    except Exception as e:  # noqa: BLE001
+        log.bind(task="cost").warning(f"Firestore usage read failed, using SQLite: {e}")
+    _ensure_schema()
+    conn = _connect()
+    with _lock:
+        rows = conn.execute(
+            "SELECT ts, provider, model, kind, in_tokens, out_tokens, cost_usd, job_id "
+            "FROM usage_events WHERE ts >= ?",
+            (since,),
+        ).fetchall()
+    return [dict(r) for r in rows], "sqlite"
+
+
+def storage_info(backend: str) -> dict:
+    """Which store the numbers came from, for the dashboard badge."""
+    info: dict = {"backend": backend}
+    try:
+        from . import firestore_sync
+
+        st = firestore_sync.status()
+        info.update(
+            mode=st["mode"], connected=st["connected"], project=st["project"],
+            collection=st["usage_collection"], warning=st["warning"],
+            pending=st["pending_usage"],
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return info
+
+
+def _blank_agg() -> dict:
+    return {"c": 0, "it": 0, "ot": 0, "cost": 0.0}
+
+
+def _add(agg: dict, it: int, ot: int, cost: float) -> None:
+    agg["c"] += 1
+    agg["it"] += it
+    agg["ot"] += ot
+    agg["cost"] += cost
 
 
 def report(days: int = 30, *, debug: bool = False) -> dict:
     """Aggregate usage for the admin dashboard.
 
-    Returns totals plus per-model, per-job/session, and per-day breakdowns
-    for the last ``days``. Recomputes stored $0 / stale costs from the current
-    rate table first.
+    Totals plus per-model, per-job/session and per-day breakdowns for the last
+    ``days``. Cost is recomputed from the current rate table for every event.
     """
+    days = max(1, int(days))
     try:
-        backfill_costs()
-        _ensure_schema()
-        since = time.time() - max(1, days) * 86400
-        conn = _connect()
-        with _lock:
-            total = conn.execute(
-                "SELECT COUNT(*) c, COALESCE(SUM(in_tokens),0) it, "
-                "COALESCE(SUM(out_tokens),0) ot, COALESCE(SUM(cost_usd),0) cost "
-                "FROM usage_events WHERE ts >= ?",
-                (since,),
-            ).fetchone()
-            by_model = conn.execute(
-                "SELECT provider, model, COUNT(*) c, COALESCE(SUM(in_tokens),0) it, "
-                "COALESCE(SUM(out_tokens),0) ot, COALESCE(SUM(cost_usd),0) cost "
-                "FROM usage_events WHERE ts >= ? GROUP BY provider, model "
-                "ORDER BY cost DESC, c DESC",
-                (since,),
-            ).fetchall()
-            by_job = conn.execute(
-                "SELECT COALESCE(NULLIF(TRIM(job_id), ''), '') AS job_id, "
-                "COUNT(*) c, COALESCE(SUM(in_tokens),0) it, "
-                "COALESCE(SUM(out_tokens),0) ot, COALESCE(SUM(cost_usd),0) cost, "
-                "MAX(ts) AS last_ts, MIN(ts) AS first_ts "
-                "FROM usage_events WHERE ts >= ? "
-                "AND TRIM(COALESCE(job_id, '')) != '' "
-                "GROUP BY COALESCE(NULLIF(TRIM(job_id), ''), '') "
-                "ORDER BY last_ts DESC",
-                (since,),
-            ).fetchall()
-            by_job_models = conn.execute(
-                "SELECT COALESCE(NULLIF(TRIM(job_id), ''), '') AS job_id, "
-                "provider, model, COUNT(*) c, COALESCE(SUM(in_tokens),0) it, "
-                "COALESCE(SUM(out_tokens),0) ot, COALESCE(SUM(cost_usd),0) cost "
-                "FROM usage_events WHERE ts >= ? "
-                "AND TRIM(COALESCE(job_id, '')) != '' "
-                "GROUP BY job_id, provider, model "
-                "ORDER BY cost DESC, c DESC",
-                (since,),
-            ).fetchall()
-            by_day = conn.execute(
-                "SELECT CAST((ts) / 86400 AS INT) * 86400 day, "
-                "COUNT(*) c, COALESCE(SUM(cost_usd),0) cost "
-                "FROM usage_events WHERE ts >= ? GROUP BY day ORDER BY day DESC",
-                (since,),
-            ).fetchall()
-        labels = _job_labels([r["job_id"] for r in by_job if r["job_id"]])
+        since = time.time() - days * 86400
+        events, backend = _load_events(since)
+
+        total = _blank_agg()
+        by_model: dict[tuple[str, str], dict] = {}
+        by_job: dict[str, dict] = {}
+        by_job_model: dict[tuple[str, str, str], dict] = {}
+        by_day: dict[int, dict] = {}
+        for e in events:
+            it = int(e.get("in_tokens") or 0)
+            ot = int(e.get("out_tokens") or 0)
+            prov = e.get("provider") or ""
+            model = e.get("model") or ""
+            cost = estimate_cost(
+                provider=prov, model=model, kind=e.get("kind") or "text",
+                in_tokens=it, out_tokens=ot,
+            )
+            e["_cost"] = cost
+            ts = float(e.get("ts") or 0)
+            jid = (e.get("job_id") or "").strip()
+            _add(total, it, ot, cost)
+            _add(by_model.setdefault((prov, model), _blank_agg()), it, ot, cost)
+            _add(by_day.setdefault(int(ts // 86400) * 86400, _blank_agg()), it, ot, cost)
+            if jid:
+                j = by_job.setdefault(jid, {**_blank_agg(), "last_ts": 0.0, "first_ts": ts})
+                _add(j, it, ot, cost)
+                j["last_ts"] = max(j["last_ts"], ts)
+                j["first_ts"] = min(j["first_ts"], ts)
+                _add(by_job_model.setdefault((jid, prov, model), _blank_agg()), it, ot, cost)
+
+        labels = _job_labels(list(by_job))
         models_by_job: dict[str, list] = {}
-        for r in by_job_models:
-            jid = r["job_id"] or ""
-            if not jid:
-                continue
+        for (jid, prov, model), a in sorted(
+            by_job_model.items(), key=lambda kv: (-kv[1]["cost"], -kv[1]["c"])
+        ):
             models_by_job.setdefault(jid, []).append(
-                {
-                    "provider": r["provider"] or "",
-                    "model": r["model"] or "",
-                    "c": r["c"],
-                    "it": r["it"],
-                    "ot": r["ot"],
-                    "cost": round(r["cost"] or 0.0, 4),
-                }
+                {"provider": prov, "model": model, "c": a["c"], "it": a["it"],
+                 "ot": a["ot"], "cost": round(a["cost"], 4)}
             )
         by_job_out = []
-        for r in by_job:
-            jid = r["job_id"] or ""
-            if not jid:
-                continue  # unattributed rows removed from By job / session
+        for jid, a in by_job.items():
             meta = labels.get(jid) or {}
-            title = meta.get("title") or jid
             by_job_out.append(
                 {
                     "job_id": jid,
-                    "title": title,
+                    "title": meta.get("title") or jid,
                     "filename": meta.get("filename") or "",
                     "status": meta.get("status") or "",
-                    "c": r["c"],
-                    "it": r["it"],
-                    "ot": r["ot"],
-                    "cost": round(r["cost"] or 0.0, 4),
-                    "last_ts": r["last_ts"] or 0,
-                    "first_ts": r["first_ts"] or 0,
+                    "c": a["c"], "it": a["it"], "ot": a["ot"],
+                    "cost": round(a["cost"], 4),
+                    "last_ts": a["last_ts"], "first_ts": a["first_ts"],
                     "models": models_by_job.get(jid) or [],
                 }
             )
         by_job_out.sort(key=lambda j: float(j.get("last_ts") or 0), reverse=True)
+
         out: dict = {
             "days": days,
             "calls": total["c"],
             "in_tokens": total["it"],
             "out_tokens": total["ot"],
-            "cost_usd": round(total["cost"] or 0.0, 4),
-            "by_model": [dict(r) for r in by_model],
+            "cost_usd": round(total["cost"], 4),
+            "by_model": [
+                {"provider": p_, "model": m_, "c": a["c"], "it": a["it"], "ot": a["ot"], "cost": a["cost"]}
+                for (p_, m_), a in sorted(by_model.items(), key=lambda kv: (-kv[1]["cost"], -kv[1]["c"]))
+            ],
             "by_job": by_job_out,
             "by_day": [
-                {
-                    "day": r["day"],
-                    "calls": r["c"],
-                    "cost_usd": round(r["cost"] or 0.0, 4),
-                }
-                for r in by_day
+                {"day": d, "calls": a["c"], "cost_usd": round(a["cost"], 4)}
+                for d, a in sorted(by_day.items(), reverse=True)
             ],
-            "rates_note": "Estimates use current public paid-tier rates; Ollama is $0.",
+            "storage": storage_info(backend),
+            "rates_note": "Estimates use current public paid-tier rates and Gemini's own token counts when reported.",
         }
         if debug:
-            with _lock:
-                raw = conn.execute(
-                    "SELECT ts, provider, model, kind, in_tokens, out_tokens, "
-                    "cost_usd, job_id FROM usage_events WHERE ts >= ? "
-                    "ORDER BY ts DESC LIMIT 250",
-                    (since,),
-                ).fetchall()
-            out["debug_events"] = [dict(r) for r in raw]
+            recent = sorted(events, key=lambda e: float(e.get("ts") or 0), reverse=True)[:250]
+            out["debug_events"] = [
+                {**{k: e.get(k) for k in _EVENT_KEYS}, "cost_usd": e.get("_cost", 0.0)} for e in recent
+            ]
         return out
     except Exception as e:  # noqa: BLE001
         log.bind(task="cost").warning(f"usage report failed: {e}")
         return {
-            "days": days,
-            "calls": 0,
-            "in_tokens": 0,
-            "out_tokens": 0,
-            "cost_usd": 0.0,
-            "by_model": [],
-            "by_job": [],
-            "by_day": [],
+            "days": days, "calls": 0, "in_tokens": 0, "out_tokens": 0, "cost_usd": 0.0,
+            "by_model": [], "by_job": [], "by_day": [],
+            "storage": storage_info("error"), "error": str(e)[:200],
         }

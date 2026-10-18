@@ -420,6 +420,70 @@ VIDEO_THEMES: dict[str, dict] = {
 }
 
 
+
+def _make_theme(key, label, desc, *, dark, bg, ink, muted, panel, accents):
+    """Build a theme entry from a handful of colours (4 accent rotations)."""
+    line = "rgba(255,255,255,.10)" if dark else "rgba(10,10,10,.10)"
+    grid = "rgba(255,255,255,.045)" if dark else "rgba(10,10,10,.04)"
+    cap_bg = "rgba(0,0,0,.62)" if dark else "rgba(255,255,255,.92)"
+    return {
+        "key": key,
+        "label": label,
+        "description": desc,
+        "base": {
+            "ink": ink, "muted": muted, "panel": panel, "line": line, "bg": bg,
+            "grid": grid, "caption_bg": cap_bg, "caption_text": ink,
+            "diagram_bg": bg, "dark": dark,
+        },
+        "palettes": [{"a": a, "b": b, "glow": g} for a, b, g in accents],
+        "mermaid": {
+            "primaryColor": panel, "primaryBorderColor": accents[0][0],
+            "primaryTextColor": ink, "lineColor": muted, "mainBkg": panel,
+            "secondaryColor": panel, "tertiaryColor": bg,
+            "activeFill": accents[0][0], "activeStroke": accents[0][1],
+        },
+        "swatch": [accents[0][0], accents[1][0], accents[2][0]],
+    }
+
+
+# More colour choices. Every one is a full palette, usable with any template.
+_NEW_THEMES = (
+    ("ocean", "Ocean (Light)", "Cool white with deep-sea ink and teal, blue and cyan accents.",
+     dict(dark=False, bg="#f4fbfd", ink="#08303f", muted="#4b7686", panel="#ffffff",
+          accents=[("#0891b2", "#06b6d4", "#67e8f9"), ("#2563eb", "#3b82f6", "#93c5fd"),
+                   ("#0d9488", "#14b8a6", "#5eead4"), ("#7c3aed", "#8b5cf6", "#c4b5fd")])),
+    ("forest", "Forest (Dark)", "Deep green night with leaf, lime and amber accents.",
+     dict(dark=True, bg="#08130d", ink="#ecfdf3", muted="#8fb7a1", panel="#10201a",
+          accents=[("#34d399", "#10b981", "#059669"), ("#a3e635", "#84cc16", "#65a30d"),
+                   ("#fbbf24", "#f59e0b", "#d97706"), ("#2dd4bf", "#14b8a6", "#0d9488")])),
+    ("rose", "Rose (Blush)", "Soft blush paper with wine ink and rose, plum and gold accents.",
+     dict(dark=False, bg="#fff5f6", ink="#3b0d1a", muted="#8a5563", panel="#ffffff",
+          accents=[("#e11d48", "#f43f5e", "#fda4af"), ("#9333ea", "#a855f7", "#d8b4fe"),
+                   ("#d97706", "#f59e0b", "#fcd34d"), ("#be185d", "#db2777", "#f9a8d4")])),
+    ("citrus", "Citrus (Bright)", "Sunny cream with charcoal ink and lime, orange and sky accents.",
+     dict(dark=False, bg="#fffdf0", ink="#1c1917", muted="#6b6558", panel="#ffffff",
+          accents=[("#ea580c", "#f97316", "#fdba74"), ("#65a30d", "#84cc16", "#bef264"),
+                   ("#0284c7", "#0ea5e9", "#7dd3fc"), ("#ca8a04", "#eab308", "#fde047")])),
+    ("grape", "Grape (Dark)", "Deep violet night with orchid, pink and cyan accents.",
+     dict(dark=True, bg="#0f0a1f", ink="#f5f0ff", muted="#a99bd1", panel="#191230",
+          accents=[("#c084fc", "#a855f7", "#7e22ce"), ("#f472b6", "#ec4899", "#be185d"),
+                   ("#22d3ee", "#06b6d4", "#0e7490"), ("#facc15", "#eab308", "#a16207")])),
+    ("graphite", "Graphite (Dark)", "Neutral charcoal with a single hot orange and cool blue accents.",
+     dict(dark=True, bg="#141414", ink="#f5f5f5", muted="#a3a3a3", panel="#1f1f1f",
+          accents=[("#fb923c", "#f97316", "#c2410c"), ("#60a5fa", "#3b82f6", "#1d4ed8"),
+                   ("#f87171", "#ef4444", "#b91c1c"), ("#a3e635", "#84cc16", "#4d7c0f")])),
+    ("sand", "Sand (Warm)", "Desert paper with brown ink and terracotta, olive and teal accents.",
+     dict(dark=False, bg="#f6eddc", ink="#3a2a17", muted="#7d6a50", panel="#fffaf0",
+          accents=[("#b45309", "#d97706", "#fcd34d"), ("#4d7c0f", "#65a30d", "#bef264"),
+                   ("#0f766e", "#14b8a6", "#5eead4"), ("#9f1239", "#be123c", "#fda4af")])),
+    ("sky", "Sky (Light)", "Airy pale blue with navy ink and blue, orange and green accents.",
+     dict(dark=False, bg="#eef6ff", ink="#0b1f3a", muted="#52698a", panel="#ffffff",
+          accents=[("#1d4ed8", "#2563eb", "#93c5fd"), ("#ea580c", "#f97316", "#fdba74"),
+                   ("#059669", "#10b981", "#6ee7b7"), ("#7c3aed", "#8b5cf6", "#c4b5fd")])),
+)
+for _k, _l, _d, _kw in _NEW_THEMES:
+    VIDEO_THEMES.setdefault(_k, _make_theme(_k, _l, _d, **_kw))
+
 DEFAULT_VIDEO_THEME = "aurora"
 
 
@@ -1998,6 +2062,21 @@ for _sk, _sv in VIDEO_STYLES.items():
 # Each layout gets a globally unique HTML compose. Named frames keep their
 # geometry; clones get a unique compose id instead of sharing audiogram/stack.
 PICKER_HIDDEN: set[str] = set()
+
+
+def _name_flagships() -> None:
+    """Each template's flagship style carries the template's own name, so the
+    twelve headline picks read Whiteboard, Notebook, Chalkboard, Editorial, Magazine,
+    Broadcast, Glass, Bento, Poster, Pop, Cinema, Terminal everywhere (picker, job options, hints)."""
+    from .pipeline.edu_theme import FAMILY_INFO
+
+    for info in FAMILY_INFO.values():
+        spec = VIDEO_STYLES.get(info["flagship"])
+        if spec:
+            spec["label"] = info["label"]
+
+
+_name_flagships()
 STYLE_ALIASES: dict[str, str] = {}
 uniquify_layout_modes(VIDEO_STYLES)
 assign_group_fonts(VIDEO_STYLES)
@@ -2027,6 +2106,9 @@ _DOC_TYPE_PRIOR_WEIGHTS = (3.2, 2.4, 1.7, 1.1, 0.7)
 
 # Keyword → style boosts (weight, style).
 _STYLE_TEXT_SIGNALS: tuple[tuple[str, float, str], ...] = (
+    (r"\b(exam|homework|worked example|theorem|proof|derive|derivation|formula)\b", 2.6, "worked_example"),
+    (r"\b(top \d+|ranking|listicle|key takeaways?|\d+ (?:things|ways|tips|reasons|steps))\b", 2.4, "big_stat"),
+    (r"\b(glass|frosted|apple[- ]style|futuristic ui|ui showcase)\b", 2.4, "glass"),
     (r"\b(how[\s-]?to|step[\s-]?by[\s-]?step|walkthrough|getting started|tutorial|lab)\b", 3.2, "tutorial"),
     (r"\b(checklist|prerequisites?|install(?:ation)?|setup guide)\b", 1.6, "tutorial"),
     (r"\b(architecture|teardown|internals?|under the hood|trade-?offs?|anatomy)\b", 3.0, "teardown"),
@@ -2118,53 +2200,75 @@ def get_style_spec(video_style: str | None) -> dict:
     return deepcopy(VIDEO_STYLES[key])
 
 
+def _look(style_key: str) -> dict:
+    """What the picker shows for a style: the *real* design family it renders as.
+
+    The renderer (``pipeline.edu_theme``) maps every style key to one of twelve
+    families and one of four font pairs, so the UI reads the same tables.
+    """
+    from .pipeline.edu_theme import FAMILY_INFO, _FONTS, edu_family
+
+    fam, var = edu_family(style_key)
+    info = FAMILY_INFO[fam]
+    hf, _hw, bf = _FONTS[fam][var]
+    return {
+        "category": fam,
+        "category_label": info["label"],
+        "family": fam,
+        "family_blurb": info["blurb"],
+        "layout_mode": fam,
+        "font_label": f"{hf} + {bf}",
+        "font_stack": f'"{hf}", system-ui, sans-serif',
+        "uses": info["uses"],
+        "flagship": info["flagship"] == style_key,
+    }
+
+
 def public_video_styles() -> list[dict]:
     """Compact representation safe to expose to the frontend.
 
     Prepends an ``auto`` option so the UI can defer the pick to content analysis.
-    Includes ``category`` for Studio / Admin family filters.
+    ``category`` is the design family (Whiteboard, Notebook, Editorial,
+    Broadcast, Poster, Bento) the style actually renders as.
     """
     auto = {
         "key": AUTO_VIDEO_STYLE,
         "label": "Auto",
-        "description": "Picks the best visual template from the document type, topic, and format.",
+        "description": "Picks the best template from the document type, topic, and format.",
         "example": "Smart match · from content",
         "template": "Analyze → score styles → apply arc",
         "category": "auto",
         "category_label": "Auto",
     }
-    return [auto] + [
-        {
+    out = [auto]
+    for s in VIDEO_STYLES.values():
+        if s["key"] in PICKER_HIDDEN:
+            continue
+        look = _look(s["key"])
+        out.append({
             "key": s["key"],
             "label": s["label"],
-            "description": s["description"],
+            "description": look["family_blurb"],
             "example": s.get("example", ""),
             "template": s.get("template", ""),
-            "category": s.get("category") or _STYLE_CATEGORY_DEFAULTS.get(s["key"], "teach"),
-            "category_label": STYLE_CATEGORIES.get(
-                s.get("category") or _STYLE_CATEGORY_DEFAULTS.get(s["key"], "teach"),
-                "Other",
-            ),
-            "font_label": s.get("font_label") or _font_label_from_tokens(s.get("tokens") or {}),
-            "font_stack": (s.get("tokens") or {}).get("font") or "Inter,system-ui,sans-serif",
+            "category": look["category"],
+            "category_label": look["category_label"],
+            "family": look["family"],
+            "font_label": look["font_label"],
+            "font_stack": look["font_stack"],
             "motif": s.get("motif") or s["key"],
-            "layout_mode": s.get("layout_mode") or (s.get("tokens") or {}).get("layout_mode") or "stack",
-            "uses": s.get("uses") or s.get("example") or "",
+            "layout_mode": look["layout_mode"],
+            "uses": look["uses"],
             "variety": s.get("template") or "",
-            "chrome_caption": (s.get("tokens") or {}).get("chrome_caption") or "bar",
-            "chrome_align": (s.get("tokens") or {}).get("chrome_align") or "left",
-            "chrome_kicker": (s.get("tokens") or {}).get("chrome_kicker") or "left",
-            "chrome_motion": (s.get("tokens") or {}).get("chrome_motion") or "rise",
-            "chrome_orn": (s.get("tokens") or {}).get("chrome_orn") or "none",
-        }
-        for s in VIDEO_STYLES.values()
-        if s["key"] not in PICKER_HIDDEN
-    ]
+        })
+    return out
 
 
 def public_style_categories() -> list[dict]:
-    """Ordered category chips for Visual style filters."""
-    return [{"key": k, "label": v} for k, v in STYLE_CATEGORIES.items()]
+    """Ordered chips for the style filters: the twelve real templates."""
+    from .pipeline.edu_theme import FAMILY_INFO
+
+    return [{"key": k, "label": v["label"], "blurb": v["blurb"]} for k, v in FAMILY_INFO.items()]
 
 
 def recommend_video_style(
@@ -2338,7 +2442,7 @@ _STYLE_THEME_HINTS: dict[str, str] = {
     "explainer": "midnight",
     "documentary": "slate",
     "teardown": "cyber",
-    "tutorial": "emerald",
+    "tutorial": "snow",
     "whiteboard": "snow",
     "cinematic": "nebula",
     "neon": "cyber",
@@ -2522,7 +2626,8 @@ def public_visual_presets() -> list[dict]:
         "theme_label": "Auto",
         "featured": True,
         "dark": True,
-        "layout_mode": "stack",
+        "layout_mode": "auto",
+        "category": "auto",
         "uses": "Smart match",
         "colors": {"bg": "#0a0a0c", "ink": "#f4f4f5", "accent": "#6366f1"},
     }]
@@ -2535,41 +2640,32 @@ def public_visual_presets() -> list[dict]:
         theme = VIDEO_THEMES[tk]
         base = theme.get("base") or {}
         swatch = list(theme.get("swatch") or [])
-        cat = style.get("category") or _STYLE_CATEGORY_DEFAULTS.get(sk, "teach")
-        layout_mode = (
-            style.get("layout_mode")
-            or (style.get("tokens") or {}).get("layout_mode")
-            or "stack"
-        )
+        look = _look(sk)
+        cat = look["category"]
+        layout_mode = look["layout_mode"]
         presets.append({
             "key": f"{sk}:{tk}",
             "label": style["label"],
             "style": sk,
             "theme": tk,
             "category": cat,
-            "category_label": STYLE_CATEGORIES.get(cat, "Other"),
+            "category_label": look["category_label"],
+            "family": look["family"],
             "description": (
-                f"{style.get('description', '')} "
-                f"Layout: {str(layout_mode).replace('_', ' ')}. "
-                f"Font: {style.get('font_label') or 'Inter'}."
-            ).strip(),
+                f"{look['family_blurb']} Font: {look['font_label']}."
+            ),
             "swatch": swatch,
             "style_label": style["label"],
             "theme_label": theme["label"],
-            "font_label": style.get("font_label") or _font_label_from_tokens(style.get("tokens") or {}),
-            "font_stack": (style.get("tokens") or {}).get("font") or "Inter,system-ui,sans-serif",
+            "font_label": look["font_label"],
+            "font_stack": look["font_stack"],
             "motif": style.get("motif") or sk,
             "layout_mode": layout_mode,
-            "chrome_caption": (style.get("tokens") or {}).get("chrome_caption") or "bar",
-            "chrome_align": (style.get("tokens") or {}).get("chrome_align") or "left",
-            "chrome_kicker": (style.get("tokens") or {}).get("chrome_kicker") or "left",
-            "chrome_motion": (style.get("tokens") or {}).get("chrome_motion") or "rise",
-            "chrome_orn": (style.get("tokens") or {}).get("chrome_orn") or "none",
             "example": style.get("example", ""),
             "template": style.get("template", ""),
             "variety": style.get("template", ""),
-            "uses": style.get("uses") or style.get("example") or "",
-            "featured": sk in FEATURED_LAYOUT_KEYS,
+            "uses": look["uses"],
+            "featured": look["flagship"],
             "dark": bool(base.get("dark")),
             "colors": {
                 "bg": base.get("bg") or "#0a0a0c",

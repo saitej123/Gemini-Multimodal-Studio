@@ -48,7 +48,7 @@
 | **Gemini** | Text and vision on `gemini-3.8-flash` or `gemini-4-argon`. Speech on `gemini-3.8-live` (with `gemini-3.8-flash-tts` fallback). Live assistant on `gemini-3.8-live`. Thumbnails on Nano Banana. |
 | **Cloud Run** | Hosts the FastAPI container. `deploy/cloudbuild.yaml` builds `Dockerfile` and deploys `multimodal-studio`. |
 | **Firebase** | Hosting serves `pitch/` and can rewrite `/app` to the Cloud Run service (`firebase.json`). |
-| **Firestore** | `FIRESTORE_ENABLED=true` mirrors each job snapshot into `studio_jobs` (`app/firestore_sync.py`). Browser writes are denied (`firestore.rules`). |
+| **Firestore** | On Cloud Run it is the system of record for what must outlive a container: job snapshots (`studio_jobs`), every LLM/voice call for the cost report (`studio_usage`) and the agent's long-term memory (`studio_agent_memory`). A local run with no credentials stays on SQLite. Browser writes are denied (`firestore.rules`). See `app/firestore_sync.py`. |
 
 **Hosted demo link (no login).** `DEMO_PUBLIC=true` is set on Cloud Run. Reviewers land in Studio. Local runs keep invite-only sign-in.
 
@@ -75,7 +75,7 @@ Set `GEMINI_API_KEY` on the Cloud Run service from Secret Manager. Do not commit
     </td>
     <td width="50%">
       <img src="docs/screenshots/visual-styles.png" alt="Visual style layouts">
-      <br><sub><strong>Visual styles</strong> — Teach, Motion, HyperFrames, Decks, Story, Data, Code. Auto picks layout + palette from the document.</sub>
+      <br><sub><strong>Templates</strong> — twelve in all — Whiteboard, Notebook, Chalkboard, Editorial, Magazine, Broadcast, Glass, Bento, Poster, Pop, Cinema, Terminal. Auto picks one and a palette from the document.</sub>
     </td>
   </tr>
   <tr>
@@ -125,7 +125,23 @@ Set `GEMINI_API_KEY` on the Cloud Run service from Secret Manager. Do not commit
 
 ## Agentic AI Architecture & Flowchart
 
-Multimodal Studio operates with a production **Agentic AI Harness** (`app/pipeline/agent_harness.py`) combining a bounded **ReAct Control Loop (Thought → Action → Observation → Self-Correction)**, an explicit **8-Tool Registry**, and a **Three-Tier Layered Memory Architecture** (`app/agent_memory.py`).
+Before a single frame is drawn, an **agent harness** (`app/pipeline/agent_harness.py`) plans and checks the deck. It is a bounded controller (a turn budget, `max_turns`, shown live in the admin tab) that calls schema-validated tools, observes each result, repairs what it can, and writes what it learned to memory. Everything below is read from the code, not assumed:
+
+* **What it is, honestly.** The sequence is fixed: inspect the document, recall rules, score a style, draft the deck, audit it, repair if the audit found something fixable, save a run summary. The model writes the slides (`draft_slide_deck`); it does not choose the next tool. That is deliberate: a predictable loop never wanders, never overspends, and always leaves a receipt.
+* **Tools.** A typed registry (`tools.get_catalog()`; the Admin → Agent Harness tab lists the live set). Each tool has a parameter schema, errors are caught and returned as data, and only `save_memory` can write. `research_topic_context` and `synthesize_visual_layout` are registered too, but are run on demand from that admin tab, not in the default loop.
+* **Self-correction.** The audit checks duplicate headings, repeated visuals and narration pacing. The only repair applied automatically is giving a repeated heading a distinct one (it adds that slide's first on-screen point); the deck is then re-audited and anything left is shown in the review panel rather than guessed at.
+* **Memory** (`app/agent_memory.py`): working memory (plan and scratchpad), checkpoint memory (every turn to `agent_trace.jsonl` and a run receipt on the job) and long-term memory (preferences, style rules, feedback). Long-term memory is SQLite on disk and, when Firestore is connected, mirrored there and restored on start-up.
+
+#### Why this matters for ed-tech, and what it automates
+
+| Without it | With it |
+| --- | --- |
+| A teacher reads the whole paper to decide what to stress, which style fits, how long each slide should run | `inspect_document` classifies the document, `score_style_and_theme` picks a template and palette, both explained on screen |
+| Two slides end up with the same heading or the same bullets, and nobody notices until the video is rendered | The audit runs before rendering, so the expensive steps (voice, capture, encode) never run on a flawed deck |
+| Every run starts from zero | `recall_memory` brings back what worked for this kind of document, `save_memory` adds to it, so repeat users get better defaults |
+| Something looks wrong and nobody can say why | Every turn has its thought, tool, arguments, result, time and status, viewable per job |
+
+Cost and time stay bounded because the loop has a turn budget and each tool does one thing.
 
 ### System Flowchart
 
@@ -147,10 +163,10 @@ flowchart TD
         subgraph MemoryTiers["Layered Memory Architecture"]
             WM["Tier 1: Working Memory<br/>(Active Plan Checklist & Scratchpad)"]
             CM["Tier 2: Checkpoint Memory<br/>(Turn Receipts & JSONL Audit)"]
-            LTM["Tier 3: Long-Term Memory (SQLite)<br/>(Preferences, Style Rules, Domain Facts)"]
+            LTM["Tier 3: Long-Term Memory<br/>(SQLite, mirrored to Firestore when hosted)"]
         end
 
-        subgraph ToolRegistry["Typed 8-Tool Registry"]
+        subgraph ToolRegistry["Typed Tool Registry"]
             T1["inspect_document"]
             T2["recall_memory"]
             T3["save_memory"]
@@ -161,7 +177,7 @@ flowchart TD
             T8["draft_slide_deck"]
         end
 
-        ReAct["Autonomous ReAct Controller<br/>Thought ➔ Tool Action ➔ Observation ➔ Self-Correction"]
+        ReAct["Bounded controller<br/>Plan ➔ Tool ➔ Observe ➔ Repair"]
         Audit["Quality & Sync Audit Pass<br/>(Duplicate Detection & Dwell Sync)"]
     end
 
@@ -170,7 +186,7 @@ flowchart TD
         Capture["Frame-Seeking Capture<br/>(Playwright Headless Chromium)"]
         Merge["Audio-Video Merge<br/>(FFmpeg Synced MP4)"]
         Publish["Publish Pack & Multi-Platform<br/>(YouTube, Instagram, LinkedIn, TikTok)"]
-        Store["Job Snapshot Mirror<br/>(Firestore studio_jobs + SQLite)"]
+        Store["Storage: Firestore when hosted, SQLite locally<br/>(jobs, cost events, agent memory)"]
     end
 
     Demo --> Doc
@@ -198,14 +214,14 @@ flowchart TD
 | --- | --- |
 | **Tier 1: Working Memory** | Ephemeral per-session state tracking the active goal, dynamic plan checklist (`[✓] inspect`, `[✓] recall`, `[✓] draft`), and observation buffer. |
 | **Tier 2: Checkpoint Memory** | Episodic trace capturing every thought, tool name, argument payload, execution latency, and error state. Persisted to `agent_trace.jsonl`. |
-| **Tier 3: Long-Term Memory** | SQLite database (`workspace/agent_memory.db`) with WAL mode storing persistent user preferences, document-to-style heuristics, and learned review feedback. |
+| **Tier 3: Long-Term Memory** | SQLite (`workspace/agent_memory.db`, WAL) holding preferences, document-to-style heuristics and review feedback. Hosted (or with Firestore credentials) each write is also saved to `studio_agent_memory` and restored when the container starts. |
 | **Tool: `inspect_document`** | Deeply inspects document structure, volume, detected mathematical equations, and statistics. |
 | **Tool: `recall_memory`** | Queries long-term memory via token and tag matching for audience rules and visual pacing. |
 | **Tool: `save_memory`** | Persists run takeaways and user feedback into long-term memory for cross-session adaptation. |
 | **Tool: `score_style_and_theme`** | Evaluates document tone against target audience to score layout styles and color palettes. |
-| **Tool: `research_topic_context`** | Grounds concepts with live web research for verified facts and citations. |
-| **Tool: `synthesize_visual_layout`** | Invokes `layout_engine` to compute data-fit cell coordinates and verify collision-free geometry. |
-| **Tool: `audit_and_fix_slides`** | Deterministically reviews slides for duplicate headings, visual repetition, and voice-sync drift, triggering automated repair passes. |
+| **Tool: `research_topic_context`** | Grounds concepts with live web research. Run on demand from Admin → Agent Harness (topic research for a job runs separately, in the pipeline). |
+| **Tool: `synthesize_visual_layout`** | Asks `layout_engine` whether a list of points fits a collision-free geometry. On demand from the admin tab; the renderer runs the same engine for every slide. |
+| **Tool: `audit_and_fix_slides`** | Deterministic review for duplicate headings, repeated visuals and narration pacing. The controller repairs repeated headings and re-audits. |
 | **Tool: `draft_slide_deck`** | Synthesizes structured slide deck JSON adhering to strict formatting constraints and word budgets. |
 
 ### Agent Harness Screenshots & Dashboard
@@ -219,11 +235,11 @@ flowchart TD
   <tr>
     <td width="50%">
       <img src="docs/screenshots/agent-harness-dashboard.png" alt="Agent Harness Dashboard & Memory Explorer">
-      <br><sub><strong>Agent Harness &amp; Memory Explorer</strong> — 4 architecture gauges, namespace filter, and live SQLite memory store with search.</sub>
+      <br><sub><strong>Agent Harness &amp; Memory Explorer</strong> — gauges read from the server (turn budget, tool count, memory backend, audit, Firebase/storage status), namespace filter, and a searchable memory store.</sub>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/agent-tools-catalog.png" alt="8-Tool Registry Catalog">
-      <br><sub><strong>8-Tool Registry</strong> — Schema-validated domain tools with parameter typing and sandboxed dispatch.</sub>
+      <img src="docs/screenshots/agent-tools-catalog.png" alt="Tool Registry Catalog">
+      <br><sub><strong>Tool Registry</strong> — Schema-validated domain tools with parameter typing and sandboxed dispatch.</sub>
     </td>
   </tr>
   <tr>
@@ -244,7 +260,7 @@ flowchart TD
   3. `score_style_and_theme`: Recommends `teardown` style with `cyber` theme (dark glass, cyan accent, KaTeX formula formatting).
   4. `draft_slide_deck`: Generates multi-beat explainer with embedded LaTeX formulas:
      $$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
-  5. `audit_and_fix_slides`: Validates KaTeX syntax and confirms no duplicate headings.
+  5. `audit_and_fix_slides`: Confirms no duplicate headings or repeated visuals and checks narration pacing.
   6. `save_memory`: Records session takeaways and citation tags to persistent memory.
 
 ```json
@@ -267,7 +283,7 @@ flowchart TD
   1. `inspect_document`: Identifies business memo with critical percentages and currency values.
   2. `recall_memory`: Pulls `style_rules:executive_summary`: *Lead with key business metrics and high-level decision pillars.*
   3. `score_style_and_theme`: Selects `minimal` style with `editorial` palette and weighted layout geometry.
-  4. `synthesize_visual_layout`: Evaluates `weights: [100, 45, 30]` and builds a squarified treemap where retention dominates the visual field.
+  4. Render: the layout engine reads `weights: [100, 45, 30]` and builds a squarified treemap where retention dominates the visual field.
 
 ```json
 {
@@ -312,7 +328,7 @@ flowchart TD
 1. **Sign in** at `http://127.0.0.1:8001` (bootstrap admin is set in `.env`). Admins see the **Admin** tab (users, visual styles, cron, costs).
 2. **Studio → drop a file** (or click the dropzone). PDF / Word / PPT / notes / images all work.
 3. **Pick a video format** (YouTube, Shorts, Reels, TikTok, Square, LinkedIn) and a **target length**.
-4. **Visual style** — leave **Auto**, or pick a layout family (Teach, Motion, HyperFrames, …) and a color palette.
+4. **Visual style** — leave **Auto**, or pick one of the twelve templates (Whiteboard, Notebook, Chalkboard, Editorial, Magazine, Broadcast, Glass, Bento, Poster, Pop, Cinema, Terminal) and one of 14 color palettes. Admin → Visual styles shows a real render of a sample lesson, made by the same code that films the video.
 5. **Audience** — age + knowledge, or leave Auto. Edit the teaching prompt if you want a custom tone.
 6. **Voices** — preview a Gemini studio voice (default Kore). That voice narrates the whole video.
 7. **Run pipeline**. Watch the strip: Document → VLM extract → Slides → Voiceover → Video → Publish.
@@ -360,18 +376,30 @@ GPU thumbnail image: `docker compose --profile gpu up --build`
 | `GEMINI_API_KEY` | Cloud LLM, vision extract, Nano Banana thumbnails |
 | `GEMINI_MODEL` | Pinned to `gemini-3.8-flash` (or `gemini-4-argon`) |
 | `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | Expressive narration. Default `gemini-3.8-live` / `Kore` |
-| `FIRESTORE_ENABLED` | Mirror job snapshots to Firestore (`studio_jobs`) |
+| `FIRESTORE_ENABLED` | Use Firestore for job snapshots (`studio_jobs`). Always on in Cloud Run |
+| `GOOGLE_CLOUD_PROJECT` | Project for Firestore when running locally with `gcloud auth application-default login` |
+| `COST_STORE` / `MEMORY_STORE` | `auto` (default: Firestore when connected, else SQLite), `sqlite` or `firestore`. Cost events go to `studio_usage`, agent memory to `studio_agent_memory` |
 | `DEMO_PUBLIC` | `true` on the hosted link: no login screen (local default keeps sign-in) |
 | `YOUTUBE_CLIENT_SECRETS` | Path to OAuth client JSON for YouTube upload |
 | `AUTO_ENABLED` | Nightly paper → video scheduler (admin) |
 
 Social posting tokens live in `workspace/social_credentials.json` (admin UI), not in git.
 
+**Where data lives.**
+
+| Data | Local run | Hosted (Cloud Run) |
+| --- | --- | --- |
+| Jobs and history | SQLite `workspace/sessions.db` | Firestore `studio_jobs` (container disk is wiped on restart) |
+| Cost and usage events | SQLite `usage_events` | Firestore `studio_usage`, read back for the dashboard |
+| Agent long-term memory | SQLite `workspace/agent_memory.db` | Firestore `studio_agent_memory`, restored on start-up |
+
+Admin → Cost tracker shows which store the numbers came from, and Admin → Agent Harness has a Firebase & storage card that turns red if a hosted instance is not connected. The cost report uses Gemini's own token counts when the response carries them, and attributes spend from parallel slide and voice calls to the job that made them.
+
 ---
 
 ## How a slide fits its content
 
-The same notes do not get a recoloured copy of one card stack. Each slide is laid out from its own items — how many there are, how long each line is, and an optional importance score — so the geometry changes with the data. The visual style you pick (Teach, Motion, Decks, …) chooses the first layout family, the background motif, and the heading treatment. Two styles never share that combination.
+The same notes do not get a recoloured copy of one card stack. Each slide is laid out from its own items — how many there are, how long each line is, and an optional importance score — so the geometry changes with the data. The template you pick (twelve families, each with three slide layouts) sets the structure, motion and font pair; slides in one deck move differently from each other. Type is sized per slide so the frame is used end to end. To add a template, add a style entry in `app/video_options.py`, map it to a family in `app/pipeline/edu_theme.py` (`EDU_FAMILY_MAP`, `FAMILY_INFO`); a whole new family is a CSS block plus fonts in `app/pipeline/edu_families_extra.py`, and it appears in the picker with a live preview.
 
 | What you drop in | What you see |
 | --- | --- |

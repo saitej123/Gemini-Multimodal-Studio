@@ -20,6 +20,7 @@ from typing import Any
 
 from ..config import get_settings
 from ..logging_setup import log
+from . import ratelimit
 
 # Gemini 3.8 Live is the primary voice engine for human-like narration.
 # Fallbacks for accounts where Live API streaming is restricted.
@@ -387,7 +388,10 @@ def synthesize(text: str, out_path: Path, voice: str | None = None) -> str:
     for piece in pieces:
         spoken = False
         for model in models:
-            for i in range(attempts):
+            i = 0
+            max_tries = attempts
+            while i < max_tries:
+                ratelimit.throttle()
                 try:
                     if "live" in model.lower():
                         pcm, rate = _run_coroutine_safely(
@@ -407,11 +411,16 @@ def synthesize(text: str, out_path: Path, voice: str | None = None) -> str:
                             f"{model} unavailable ({e}); trying next Gemini voice model"
                         )
                         break
-                    if i < attempts - 1:
+                    max_tries = ratelimit.attempts_for(e, max_tries)
+                    if i < max_tries - 1:
                         log.bind(task="TTS").warning(
                             f"{model} attempt {i + 1} failed ({e}); retrying"
                         )
-                        time.sleep(base * (2 ** i) + random.uniform(0, base * 0.5))
+                        delay = ratelimit.backoff_delay(e, i, base)
+                        if ratelimit.is_rate_limited(e):
+                            ratelimit.note_limit(delay)
+                        time.sleep(delay)
+                i += 1
             if spoken:
                 break
         if not spoken:
