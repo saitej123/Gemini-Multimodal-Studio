@@ -17,6 +17,7 @@ framed diagram, a YouTube-style caption bar, and a top progress bar.
 from __future__ import annotations
 
 import html
+import os
 import json
 import re
 from collections import Counter
@@ -100,6 +101,53 @@ def _generate_json(prompt: str, *, task: str, want_json: bool = True) -> dict:
                     f"JSON parse failed ({e}); retry {i + 1}/{attempts - 1}"
                 )
     raise last_exc if last_exc else ValueError("no parseable JSON object in response")
+
+
+# Hand-drawn title underline + corner doodles. Each path is ``pathLength=1`` so the
+# frame timeline can "draw" it (stroke-dashoffset driven by --p).
+_H_UNDER = (
+    '<svg class="h-under" viewBox="0 0 360 18" preserveAspectRatio="none" aria-hidden="true">'
+    '<path class="draw" pathLength="1" d="M3 11 C 50 3, 90 16, 140 8 S 230 4, 280 11 S 340 12, 357 6"/></svg>'
+)
+_COVER_ART = '<div class="cover-art" aria-hidden="true"></div>'
+_DECOS = (
+    '<div class="decos" aria-hidden="true">'
+    '<svg class="deco d1" viewBox="0 0 100 100"><path class="draw" pathLength="1" '
+    'd="M50 8 L60 38 L92 40 L66 58 L76 90 L50 72 L24 90 L34 58 L8 40 L40 38 Z"/></svg>'
+    '<svg class="deco d2" viewBox="0 0 100 100"><path class="draw" pathLength="1" '
+    'd="M10 72 C 20 10, 84 10, 82 50 C 80 84, 40 82, 46 56 C 50 40, 70 40, 72 52"/>'
+    '<path class="draw" pathLength="1" d="M64 44 L72 54 L82 46"/></svg>'
+    '<svg class="deco d3" viewBox="0 0 100 100"><path class="draw" pathLength="1" '
+    'd="M50 8 C 85 6, 96 40, 88 66 C 78 94, 30 98, 14 70 C 2 48, 14 14, 52 12 C 70 10, 84 22, 86 30"/></svg>'
+    '</div>'
+)
+
+# Design families. Style key -> family; the rest are spread by hash so every
+# style still lands on a distinct-feeling layout.
+_EDU_FAMILY_MAP = {
+    "sketch": ("whiteboard", "playful", "teardown", "folk_freq", "chalk"),
+    "notebook": ("tutorial", "explainer", "notion", "slides", "agenda", "minimal"),
+    "split": ("editorial", "documentary", "keynote", "pitch", "corporate", "geo_navy",
+              "coral_split", "split_media", "proof_duo", "swiss_pulse", "velvet_std"),
+    "band": ("broadcast", "lower_third", "saas", "process", "timeline_rail", "kpi_strip",
+             "device", "glass", "modern", "terminal", "blueprint"),
+    "poster": ("bold", "kinetic", "kinetic_center", "big_stat", "quote_pull", "cinematic",
+               "neon", "maximalist", "promo_sprint", "caption_pop", "hybrid_kinetic", "deconstructed"),
+    "bento": ("bento", "cards", "dataviz", "mosaic", "stack_cards", "gamma", "hybrid_data",
+              "chart_race", "blush_soft", "hybrid", "hybrid_story", "data_drift", "soft_signal"),
+}
+_EDU_FAMILIES = ("split", "band", "sketch", "poster", "bento", "notebook")
+
+
+def _edu_family(style_key: str) -> tuple[str, int]:
+    import zlib
+
+    key = str(style_key or "hybrid").strip().lower()
+    for fam, keys in _EDU_FAMILY_MAP.items():
+        if key in keys:
+            return fam, zlib.crc32(key.encode()) % 4
+    h = zlib.crc32(key.encode())
+    return _EDU_FAMILIES[h % len(_EDU_FAMILIES)], (h >> 3) % 4
 
 
 def _accent_heading(heading: str) -> str:
@@ -1622,6 +1670,31 @@ def _trim_narration(text: str, max_words: int) -> str:
     return " ".join(kept)
 
 
+def _slim_receipt(receipt: dict | None) -> dict:
+    """Small, acyclic summary of an agent run (no per-turn args/results)."""
+    r = receipt or {}
+    steps = []
+    for s in r.get("steps") or []:
+        if not isinstance(s, dict):
+            continue
+        steps.append({
+            "turn": s.get("turn"),
+            "thought": str(s.get("thought") or "")[:300],
+            "tool": s.get("tool"),
+            "status": s.get("status"),
+            "elapsed_ms": s.get("elapsed_ms"),
+        })
+    return {
+        "session_id": r.get("session_id"),
+        "total_turns": r.get("total_turns"),
+        "tools_used": list(r.get("tools_used") or []),
+        "has_errors": bool(r.get("has_errors")),
+        "total_elapsed_ms": r.get("total_elapsed_ms"),
+        "total_duration_sec": r.get("total_duration_sec"),
+        "steps": steps,
+    }
+
+
 def _enforce_word_budget(model: dict, options: dict | None) -> dict:
     """Cap total narration to the planned budget so length tracks the target.
 
@@ -1730,8 +1803,12 @@ def build_slide_model(
             work_dir = Path(opts["work_dir"]) if opts.get("work_dir") else None
             harness = AgentHarness(session_id=session_id, options=opts, work_dir=work_dir)
             model, used_llm, receipt = harness.run(raw_text, cover_image)
-            opts["agent_receipt"] = receipt
-            model["agent_receipt"] = receipt
+            # The raw receipt embeds each turn's args/result (which contain the
+            # model itself). Storing it as-is makes a circular structure that
+            # breaks JSON/Firestore serialisation, so keep a slim copy only.
+            slim = _slim_receipt(receipt)
+            opts["agent_receipt"] = slim
+            model["agent_receipt"] = slim
             model = _enforce_word_budget(model, opts)
             log.bind(task="generate").success(
                 f"Agent Harness completed {len(receipt.get('steps', []))} turns: {len(model.get('slides', []))} slides "
@@ -1894,7 +1971,19 @@ _COMPOSE_VARIETIES: dict[str, tuple[str, ...]] = {
 }
 _ALL_VARIETIES = (
     "bento", "quad", "rail", "split", "spotlight", "cards", "numbered", "chips", "grid",
+    "timeline", "stairs", "notes",
 )
+
+# Each design family prefers different content geometries, so decks differ in
+# structure (not only colour) from one template to the next.
+_COMPOSE_VARIETIES.update({
+    "edu_split": ("numbered", "spotlight", "stairs", "split", "rail"),
+    "edu_band": ("timeline", "cards", "quad", "rail", "split"),
+    "edu_sketch": ("notes", "timeline", "cards", "numbered", "chips"),
+    "edu_poster": ("spotlight", "stairs", "numbered", "chips", "cards"),
+    "edu_bento": ("bento", "quad", "cards", "stairs", "timeline"),
+    "edu_notebook": ("numbered", "notes", "rail", "chips", "split"),
+})
 
 
 def _variety_fits(name: str, n: int, vertical: bool) -> bool:
@@ -1918,6 +2007,12 @@ def _variety_fits(name: str, n: int, vertical: bool) -> bool:
         return n >= 2
     if name == "grid":
         return n >= 3 and not vertical
+    if name == "timeline":
+        return 3 <= n <= 5 and not vertical
+    if name == "stairs":
+        return 3 <= n <= 5
+    if name == "notes":
+        return 2 <= n <= 5
     return True
 
 
@@ -2069,6 +2164,39 @@ def _render_bullet_variety(
         )
         cls = "v-bento v-quad reveal" if variety == "quad" else "v-bento reveal"
         return f'<div class="{cls}">{tiles}</div>{_chip_row(tail, cap + 1)}'
+    if variety == "timeline":
+        head, tail = items[:5], items[5:]
+        nodes = "".join(
+            f'<div class="v-tile v-tl" style="--i:{i + 1}">'
+            f'<span class="v-dot">{i + 1}</span>'
+            f'<span class="v-t">{_txt(t)}</span></div>'
+            for i, t in enumerate(head)
+        )
+        line = (
+            '<svg class="v-line" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true">'
+            '<path class="draw" pathLength="1" d="M0 2 L100 2"/></svg>'
+        )
+        return (
+            f'<div class="v-time reveal" style="--n:{len(head)}">{line}{nodes}</div>{_chip_row(tail, 6)}'
+        )
+    if variety == "stairs":
+        head, tail = items[:5], items[5:]
+        steps_ = "".join(
+            f'<div class="v-tile v-st" style="--i:{i + 1};--k:{i}">'
+            f'<span class="{mark}">{i + 1:02d}</span>'
+            f'<span class="v-t">{_txt(t)}</span></div>'
+            for i, t in enumerate(head)
+        )
+        return f'<div class="v-stairs reveal" style="--n:{len(head)}">{steps_}</div>{_chip_row(tail, 6)}'
+    if variety == "notes":
+        head, tail = items[:5], items[5:]
+        notes_ = "".join(
+            f'<div class="v-card v-note" style="--i:{i + 1};--k:{i}">'
+            f'<span class="v-pin" aria-hidden="true"></span>'
+            f'<span class="v-t">{_txt(t)}</span></div>'
+            for i, t in enumerate(head)
+        )
+        return f'<div class="v-notes reveal" style="--n:{len(head)}">{notes_}</div>{_chip_row(tail, 6)}'
     if variety == "chips":
         return f'<div class="v-spot reveal">{_chip_row(items, 1)}</div>'
     return ""
@@ -2446,6 +2574,12 @@ def _render_equations(equations: list) -> str:
     return f'<div class="eq-list slide-has-math">{"".join(cards)}</div>'
 
 
+# The experimental "template-free" layout synthesizer produced chevron/stagger
+# geometry that could overflow the frame. Educator decks use the predictable,
+# tested layouts below; set LAYOUT_ENGINE=1 to bring the synthesizer back.
+_USE_LX_ENGINE = os.environ.get("LAYOUT_ENGINE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def render_slideshow_html(model: dict, options: dict | None = None) -> str:
     """Render a single-file HTML that shows ONE slide based on ?slide=N.
 
@@ -2481,6 +2615,7 @@ def render_slideshow_html(model: dict, options: dict | None = None) -> str:
     from ..video_options import VIDEO_STYLES as _ALL_STYLES
 
     _style_key = str(style_spec.get("key") or "hybrid")
+    _fam, _fvar = _edu_family(_style_key)
     lx_profile = lx_engine.template_profiles(list(_ALL_STYLES)).get(_style_key) or {
         "families": lx_engine.FAMILIES, "motif": "none", "htype": "plain", "tempo": 1.0,
     }
@@ -2602,10 +2737,10 @@ def render_slideshow_html(model: dict, options: dict | None = None) -> str:
             )
 
         matrix = s.get("matrix")
-        compose = str(style_spec.get("layout_mode") or "stack")
+        compose = f"edu_{_fam}"
         variety = ""
         lx_res = None
-        if not img_block:
+        if not img_block and _USE_LX_ENGINE:
             lx_items, lx_kind = _lx_items_for(
                 lx_engine, layout, s, raw_bullets, stats, steps, matrix, narration_raw,
             )
@@ -2708,17 +2843,22 @@ def render_slideshow_html(model: dict, options: dict | None = None) -> str:
 
         # Hook/quote slides hide the heading — the on-screen layout IS the title.
         hide_heading = (layout == "quote" and quote) or (layout == "hook" and hook)
-        heading_html = "" if hide_heading else f'<h2 class="reveal" data-anim-from="0.06" data-anim-dur="0.4">{_accent_heading(heading)}</h2>'
+        heading_html = "" if hide_heading else (
+            f'<h2 class="reveal" data-anim-from="0.06" data-anim-dur="0.4">{_accent_heading(heading)}</h2>'
+            f'{_H_UNDER}'
+        )
         density = _slide_density(s, layout)
 
         # Never paint page/slide numbers on the frame — they read as UI chrome
         # in the final YouTube video.
         slide_blocks.append(
-            f'<section class="slide" data-index="{idx}" data-theme="{theme}" '
+            f'<section class="slide" data-index="{idx}" data-alt="{idx % 3}" data-theme="{theme}" '
             f'data-layout="{html.escape(layout)}" data-variety="{html.escape(variety)}" data-density="{density}">'
             f'<div class="bg" aria-hidden="true"></div>'
             f'<div class="frame-orn" aria-hidden="true"></div>'
-            f'{lx_engine.motif_html(f"{lx_seed_base}|{idx}", lx_profile["motif"])}'
+            f'{_DECOS}'
+            f'{_COVER_ART if idx == 0 else ""}'
+            f'{lx_engine.motif_html(f"{lx_seed_base}|{idx}", lx_profile["motif"]) if _USE_LX_ENGINE else ""}'
             f'<div class="stage-wrap">'
             f'<div class="{scene_cls}">'
             f'<div class="kicker reveal" data-anim-from="0.02" data-anim-dur="0.35">'
@@ -2753,6 +2893,7 @@ def render_slideshow_html(model: dict, options: dict | None = None) -> str:
         for i, p in enumerate(palettes)
     )
 
+    from .edu_theme import EDU_CSS, EDU_FIT_JS
     from .sync import js_sync_constants
 
     motion_fps = int(getattr(get_settings(), "motion_fps", 24) or 24)
@@ -2768,7 +2909,11 @@ def render_slideshow_html(model: dict, options: dict | None = None) -> str:
         title=title,
         count=total,
         slides="\n".join(slide_blocks),
-        body_class="vertical" if vertical else "landscape",
+        body_class=("vertical" if vertical else "landscape") + " edu",
+        edu_family=_fam,
+        edu_font=_fvar,
+        edu_css=EDU_CSS,
+        edu_fit_js=EDU_FIT_JS,
         style_key=style_key,
         compose=compose,
         motion=html.escape(str(stok.get("chrome_motion") or "rise")),
@@ -2804,7 +2949,7 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;600;700;800&family=Baloo+2:wght@500;600;700&family=Barlow:wght@500;600;700;800&family=Bricolage+Grotesque:wght@500;600;700;800&family=Caveat:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Figtree:wght@500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital,wght@0,400;1,400&family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,700;1,7..72,500&family=Manrope:wght@500;600;700;800&family=Montserrat:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Nunito:wght@500;600;700;800&family=Oswald:wght@500;600;700&family=Outfit:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Poppins:wght@500;600;700;800&family=Rubik:wght@500;600;700;800&family=Sora:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&family=Syne:wght@500;600;700;800&family=Work+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;600;700;800&family=Baloo+2:wght@500;600;700&family=Barlow:wght@500;600;700;800&family=Bricolage+Grotesque:wght@500;600;700;800&family=Caveat:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Figtree:wght@500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital,wght@0,400;1,400&family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,500;0,7..72,700;1,7..72,500&family=Manrope:wght@500;600;700;800&family=Montserrat:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Nunito:wght@500;600;700;800&family=Oswald:wght@500;600;700&family=Outfit:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Poppins:wght@500;600;700;800&family=Rubik:wght@500;600;700;800&family=Sora:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&family=Syne:wght@500;600;700;800&family=Work+Sans:wght@500;600;700;800&family=Kalam:wght@400;700&family=Patrick+Hand&family=Permanent+Marker&family=Gloria+Hallelujah&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
@@ -4156,10 +4301,11 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
 
   {compose_css}
   {lx_css}
+  {edu_css}
 
 </style>
 </head>
-<body class="{body_class}" data-style="{style_key}" data-compose="{compose}" data-motion="{motion}" data-caption="{caption}" data-align="{align}" data-kicker="{kicker}" data-orn="{orn}" data-motif="{motif}" data-htype="{htype}">
+<body class="{body_class}" data-edu="{edu_family}" data-efont="{edu_font}" data-style="{style_key}" data-compose="{compose}" data-motion="{motion}" data-caption="{caption}" data-align="{align}" data-kicker="{kicker}" data-orn="{orn}" data-motif="{motif}" data-htype="{htype}">
 <div class="progress" id="progress"></div>
 <div class="brand-tag"><span class="dot"></span>{title}</div>
 
@@ -4329,9 +4475,19 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
       {{ sel: '.eq', from: 0.18, dur: 0.45, kind: 'pop', stagger: 0.09 }},
       {{ sel: '.hub-foot, .tr-foot', from: 0.40, dur: 0.38, kind: 'fade' }},
       {{ sel: '.b-mark', from: 0.20, dur: 0.28, kind: 'pop', stagger: 0.04 }},
+      {{ sel: '.deco', from: 0.10, dur: 0.70, kind: 'p', stagger: 0.18 }},
+      {{ sel: '.h-under path, h2 .accent', from: 0.30, dur: 0.60, kind: 'p' }},
+      {{ sel: '.v-line path', from: 0.20, dur: 0.80, kind: 'p' }},
       {{ sel: '.caption', from: 0.28, dur: 0.42, kind: 'cap' }},
     ];
+    // Each design family has its own motion language, so templates differ in
+    // how they move as well as how they look.
+    const FAM = document.body.dataset.edu || '';
+    const CARD_KIND = ({{ sketch: 'tilt', poster: 'slide', bento: 'pop', split: 'rise', band: 'drop', notebook: 'tilt' }})[FAM] || 'card';
+    const TITLE_KIND = ({{ sketch: 'tilt', poster: 'slide', band: 'slide', split: 'riseBlur', bento: 'drop', notebook: 'riseBlur' }})[FAM] || 'riseBlur';
     groups.forEach((g) => {{
+      if (g.kind === 'card') g.kind = CARD_KIND;
+      if (g.sel === 'h2') g.kind = TITLE_KIND;
       const els = [...slide.querySelectorAll(g.sel)];
       els.forEach((el, i) => {{
         // HyperFrames-style overrides: data-anim-from / data-anim-dur (seconds).
@@ -4379,6 +4535,13 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     const f1 = f0 + t.dur * FPS;
     const op = interpolate(frame, [f0, f1], [0, 1], easings.outCubic);
     let transform = '', filter = '';
+    if (t.kind === 'p') {{
+      // Hand-drawn progress: paths draw themselves, marker sweeps behind words.
+      const p = interpolate(frame, [f0, f1], [0, 1], easings.inOutCubic);
+      t.el.style.setProperty('--p', p.toFixed(3));
+      t.el.style.opacity = '1';
+      return;
+    }}
     if (t.kind === 'fade') {{
       // Opacity-only: for elements whose transform is layout-critical
       // (radial nodes, centered labels) so we never disturb positioning.
@@ -4404,6 +4567,18 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
       const y = interpolate(frame, [f0, f1], [26, 0], easings.outExpo);
       const b = interpolate(frame, [f0, f1], [9, 0], easings.outCubic);
       transform = `translateY(${{y}}px) scale(${{s}})`; filter = `blur(${{b}}px)`;
+    }} else if (t.kind === 'tilt') {{
+      // Pinned-on-the-board: swing in with a little rotation and overshoot.
+      const r = interpolate(frame, [f0, f1], [-8, 0], easings.outBack);
+      const y = interpolate(frame, [f0, f1], [30, 0], easings.outExpo);
+      const s = 0.88 + 0.12 * interpolate(frame, [f0, f1], [0, 1], easings.outBack);
+      transform = `translateY(${{y}}px) rotate(${{r}}deg) scale(${{s}})`;
+    }} else if (t.kind === 'slide') {{
+      const x = interpolate(frame, [f0, f1], [-140, 0], easings.outExpo);
+      transform = `translateX(${{x}}px)`;
+    }} else if (t.kind === 'drop') {{
+      const y = interpolate(frame, [f0, f1], [-70, 0], easings.outBack);
+      transform = `translateY(${{y}}px)`;
     }} else if (t.kind === 'lxfly') {{
       const pose = lxPose(t, frame, f0, f1);
       transform = pose.transform; filter = pose.filter;
@@ -4456,6 +4631,7 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
   function seekSlide(slide, frame, totalFrames) {{
     const targets = buildTimeline(slide);
     if (!targets) return;
+    slide.style.setProperty('--tt', (frame / FPS).toFixed(3));
     targets.forEach((t) => applyPose(t, frame));
     // Ambient drift on hero/background scenes: slow, subtle, seek-safe.
     const amb = slide.querySelector('.scene .drift, .bg-orb');
@@ -4533,6 +4709,8 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     if (s) seekSlide(s, Math.max(0, frame | 0), totalFrames | 0);
   }};
 
+  {edu_fit_js}
+
   async function show(n) {{
     n = clamp(n);
     slides.forEach((s, k) => s.classList.toggle('active', k === n));
@@ -4561,6 +4739,7 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     // body.capture so they don't fight the timeline. Build the timeline and
     // reset to frame 0 so the worker can seek from a known state.
     try {{ lxFit(slides[n]); }} catch (e) {{ /* best-effort */ }}
+    try {{ await eduFit(slides[n]); }} catch (e) {{ /* best-effort */ }}
     if (document.body.classList.contains('capture')) {{
       buildTimeline(slides[n]);
       window.__seekFrame(0, 1);
@@ -4581,6 +4760,16 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
   document.getElementById('next').onclick = () => {{ const u = new URL(location); u.searchParams.set('slide', clamp(current() + 1)); location.href = u; }};
   document.getElementById('prev').onclick = () => {{ const u = new URL(location); u.searchParams.set('slide', clamp(current() - 1)); location.href = u; }};
   document.addEventListener('keydown', e => {{ if (e.key === 'ArrowRight') document.getElementById('next').click(); if (e.key === 'ArrowLeft') document.getElementById('prev').click(); }});
+
+  // Interactive preview: keep the --tt clock running so ambient doodles drift.
+  if (!document.body.classList.contains('capture')) {{
+    const t0 = performance.now();
+    (function loop() {{
+      const a = slides.find((x) => x.classList.contains('active'));
+      if (a && !document.body.classList.contains('capture')) a.style.setProperty('--tt', ((performance.now() - t0) / 1000).toFixed(3));
+      requestAnimationFrame(loop);
+    }})();
+  }}
 
   show(current());
 </script>

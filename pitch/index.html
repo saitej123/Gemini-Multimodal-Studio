@@ -35,7 +35,9 @@
     .slide {
       display: none;
       height: calc(100dvh - 3.25rem);
-      overflow: hidden;
+      /* Scroll instead of clipping when the window is shorter than the slide. */
+      overflow-x: hidden;
+      overflow-y: auto;
     }
     .slide.is-active { display: flex; }
     .slide-inner {
@@ -97,7 +99,7 @@
           How Multimodal Studio turns documents into narrated video
         </h1>
         <p class="max-w-3xl text-sm text-base-content/60">
-          Anil Kumar (anil8860556664@gmail.com) and M Sai Teja (macharlasaiteja@gmail.com).
+          Anil Kumar and M Sai Teja.
           Built for a teacher or a student, not only a creator. Gemini 3.8 Flash writes the slides. Gemini 3.8 Live speaks them so the lesson is something you would replay.
           Cloud Run hosts the app, Firebase Hosting serves this pitch, and Firestore keeps each job snapshot.
           The hosted link opens straight in Studio — no sign-in.
@@ -376,8 +378,8 @@
             <p class="text-sm font-medium">Submission line</p>
             <p class="text-xs text-base-content/70">
               Anil Kumar and M Sai Teja. A teacher drops a chapter and gets a video a student can replay. The highlight moves with the voice.
-              App: multimodal-studio-469528918286.us-central1.run.app (no login). Repo: github.com/saitej123/Gemini-Multimodal-Studio.
-              Next: handwritten teaching templates, Manim-style formulas, YouTuber looks you can pick or customise, and new animation skills.
+              App: <a class="link" href="https://multimodal-studio-469528918286.us-central1.run.app" target="_blank" rel="noopener noreferrer">multimodal-studio-469528918286.us-central1.run.app</a> (no login). Repo: <a class="link" href="https://github.com/saitej123/Gemini-Multimodal-Studio" target="_blank" rel="noopener noreferrer">github.com/saitej123/Gemini-Multimodal-Studio</a>.
+              Built: six unique looks with hand-drawn motion. Next: Manim-style formulas, questions mid-video, and new animation skills.
               The 3 to 4 minute demo video is the piece still to record.
             </p>
           </div>
@@ -399,7 +401,7 @@
         slides.forEach((el, idx) => el.classList.toggle("is-active", idx === i));
         tabs.forEach((el, idx) => {
           el.classList.toggle("btn-ghost", idx !== i);
-          el.setAttribute("aria-current", idx === i ? "page" : "false");
+          if (idx === i) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
         });
         prev.disabled = i === 0;
         next.textContent = i === slides.length - 1 ? "Done" : "Next";

@@ -107,9 +107,9 @@ class JobStore:
         except Exception:
             pass
         try:
-            from .firestore_sync import mirror_job
+            from .firestore_sync import queue_mirror
 
-            mirror_job(job.dict())
+            queue_mirror(job.dict())
         except Exception:
             pass
 

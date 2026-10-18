@@ -9,6 +9,8 @@ audits directly to the ``studio_jobs`` collection in Cloud Firestore.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from typing import Any
 
 from .config import get_settings
@@ -74,38 +76,111 @@ def _client():
     return _CLIENT
 
 
-def mirror_job(snapshot: dict) -> bool:
-    """Persist/merge a job snapshot into the Firestore collection."""
-    global _SYNCED_COUNT
-    if not enabled():
-        return False
-    client = _client()
-    if client is None:
-        return False
+def _clean(value: Any, depth: int = 0, _seen: set | None = None) -> Any:
+    """Plain, acyclic, depth-limited copy that Firestore can always encode."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:20000]
+    if depth >= 5:
+        return None
+    seen = _seen if _seen is not None else set()
+    if isinstance(value, (dict, list, tuple)):
+        oid = id(value)
+        if oid in seen:
+            return None
+        seen = seen | {oid}
+        if isinstance(value, dict):
+            return {str(k)[:100]: _clean(v, depth + 1, seen) for k, v in list(value.items())[:80]}
+        return [_clean(v, depth + 1, seen) for v in list(value)[:80]]
+    return str(value)[:500]
+
+
+_PENDING: dict[str, dict] = {}
+_PENDING_LOCK = threading.Lock()
+_WAKE = threading.Event()
+_WORKER: threading.Thread | None = None
+
+
+def _build_doc(snapshot: dict) -> dict | None:
+    """Acyclic, size-limited Firestore document from a job snapshot."""
     job_id = str(snapshot.get("id") or "").strip()
     if not job_id:
-        return False
-
-    doc = {
+        return None
+    options = snapshot.get("options") or {}
+    keep_opts = {
+        k: v for k, v in list(options.items())
+        if k not in {"agent_receipt", "work_dir"} and isinstance(v, (str, int, float, bool, type(None)))
+    }
+    content = snapshot.get("content") or {}
+    return {
         "id": job_id,
         "filename": snapshot.get("filename") or "",
         "status": snapshot.get("status") or "",
         "error": snapshot.get("error") or "",
         "user_id": snapshot.get("user_id") or "",
-        "stages": snapshot.get("stages") or [],
-        "artifacts": snapshot.get("artifacts") or {},
-        "options": snapshot.get("options") or {},
+        "title": str(content.get("slide_title") or "")[:200],
+        "slide_count": len(content.get("slides") or []),
+        "stages": _clean(snapshot.get("stages") or []),
+        "artifacts": _clean(snapshot.get("artifacts") or {}),
+        "options": _clean(keep_opts),
         "created_at": snapshot.get("created_at"),
-        "updated_at": snapshot.get("updated_at") or snapshot.get("created_at"),
+        "updated_at": time.time(),
     }
+
+
+def _send(doc: dict) -> bool:
+    global _SYNCED_COUNT
+    client = _client()
+    if client is None:
+        return False
     try:
-        col = _collection_name()
-        client.collection(col).document(job_id).set(doc, merge=True)
+        client.collection(_collection_name()).document(doc["id"]).set(doc, merge=True)
         _SYNCED_COUNT += 1
         return True
     except Exception as e:  # noqa: BLE001
-        _LOG.warning(f"Firestore sync failed for job {job_id}: {e}")
+        _LOG.warning(f"Firestore sync failed for job {doc['id']}: {e}")
         return False
+
+
+def _worker_loop() -> None:
+    while True:
+        _WAKE.wait()
+        time.sleep(0.8)  # coalesce bursts of updates
+        _WAKE.clear()
+        with _PENDING_LOCK:
+            batch = dict(_PENDING)
+            _PENDING.clear()
+        for doc in batch.values():
+            _send(doc)
+
+
+def queue_mirror(snapshot: dict) -> None:
+    """Non-blocking: keep the latest doc per job and sync it in the background."""
+    global _WORKER
+    if not enabled():
+        return
+    try:
+        doc = _build_doc(snapshot)
+    except Exception as e:  # noqa: BLE001
+        _LOG.warning(f"Firestore snapshot skipped: {e}")
+        return
+    if not doc:
+        return
+    with _PENDING_LOCK:
+        _PENDING[doc["id"]] = doc
+        if _WORKER is None or not _WORKER.is_alive():
+            _WORKER = threading.Thread(target=_worker_loop, name="firestore-sync", daemon=True)
+            _WORKER.start()
+    _WAKE.set()
+
+
+def mirror_job(snapshot: dict) -> bool:
+    """Synchronous variant (kept for scripts/tests)."""
+    if not enabled():
+        return False
+    doc = _build_doc(snapshot)
+    return bool(doc) and _send(doc)
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:

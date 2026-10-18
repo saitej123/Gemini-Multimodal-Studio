@@ -95,7 +95,7 @@ def save_job(snapshot: dict) -> None:
                 "status": snapshot.get("status", ""),
                 "created_at": snapshot.get("created_at", time.time()),
                 "updated_at": time.time(),
-                "data": json.dumps(snapshot),
+                "data": json.dumps(snapshot, default=str),
             },
         )
         conn.commit()

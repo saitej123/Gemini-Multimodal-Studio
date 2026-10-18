@@ -467,21 +467,31 @@ def stage_narrate(job: Job) -> None:
             engine = caps.tts_engine
             has_recorded = False
             has_tts = False
+            todo: list[tuple[str, Path]] = []
+            slots: dict[int, Path] = {}
             for i, text in enumerate(narrations):
                 if i in recorded_paths:
                     src = recorded_paths[i]
                     dst = audio_dir / f"slide_{i:03d}{src.suffix.lower()}"
                     _clear_slide_audio(audio_dir, i)
                     _shutil.copyfile(src, dst)
-                    paths.append(dst)
+                    slots[i] = dst
                     has_recorded = True
                 else:
                     out = audio_dir / f"slide_{i:03d}{media.tts.output_suffix()}"
                     _clear_slide_audio(audio_dir, i)
-                    media.tts.synthesize(text or "...", out, voice=gemini_voice)
-                    actual = out if out.exists() else out.with_suffix(".wav")
-                    paths.append(actual)
+                    todo.append((text or "...", out))
+                    slots[i] = out
                     has_tts = True
+            if todo:
+                media.synthesize_many(
+                    todo,
+                    voice=gemini_voice,
+                    workers=get_settings().effective_llm_parallel(),
+                )
+            for i in range(len(narrations)):
+                p_ = slots[i]
+                paths.append(p_ if p_.exists() else p_.with_suffix(".wav"))
             if has_recorded and has_tts:
                 engine = "mixed"
             elif has_recorded:

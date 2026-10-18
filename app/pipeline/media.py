@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -138,22 +139,61 @@ def generate_voiceover(
     return actual, engine
 
 
+def synthesize_many(
+    items: list[tuple[str, Path]],
+    voice: str | None = None,
+    workers: int = 3,
+) -> list[str]:
+    """Synthesize ``(text, out_path)`` clips in parallel (staggered starts).
+
+    Returns the engine name per item, in input order. The first failure is
+    re-raised after every clip has been attempted.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not items:
+        return []
+    workers = max(1, min(int(workers), len(items)))
+
+    def _one(item: tuple[str, Path]) -> str:
+        text, out = item
+        return tts.synthesize(text or "...", out, voice=voice)
+
+    if workers == 1:
+        return [_one(it) for it in items]
+    results: list = [None] * len(items)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = []
+        for it in items:
+            futs.append(ex.submit(_one, it))
+            time.sleep(0.4)  # small gap so calls overlap without bursting
+        for i, f in enumerate(futs):
+            try:
+                results[i] = f.result()
+            except Exception as e:  # noqa: BLE001
+                results[i] = e
+    for r in results:
+        if isinstance(r, Exception):
+            raise r
+    return results
+
+
 def synthesize_slide_audio(
     narrations: list[str],
     audio_dir: Path,
     voice: str | None = None,
 ) -> tuple[list[Path], str]:
-    """Synthesize one Gemini TTS clip per slide. Returns (paths, engine)."""
+    """Synthesize one Gemini clip per slide in parallel. Returns (paths, engine)."""
     audio_dir.mkdir(parents=True, exist_ok=True)
     suffix = tts.output_suffix()
-    paths: list[Path] = []
-    engine = "none"
-    for i, text in enumerate(narrations):
-        out = audio_dir / f"slide_{i:03d}{suffix}"
-        engine = tts.synthesize(text or "...", out, voice=voice)
-        actual = out if out.exists() else out.with_suffix(".wav")
-        paths.append(actual)
-    return paths, engine
+    outs = [audio_dir / f"slide_{i:03d}{suffix}" for i in range(len(narrations))]
+    engines = synthesize_many(
+        [(t or "...", o) for t, o in zip(narrations, outs)],
+        voice=voice,
+        workers=get_settings().effective_llm_parallel(),
+    )
+    paths = [o if o.exists() else o.with_suffix(".wav") for o in outs]
+    return paths, (engines[-1] if engines else "none")
 
 
 # ---------------------------------------------------------------- capture ----
