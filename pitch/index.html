@@ -156,7 +156,7 @@
               <li class="step" data-content="6"><span class="text-xs font-semibold">6. Meta<span class="block font-normal text-base-content/50">Thumb + Socials</span></span></li>
               <li class="step" data-content="7"><span class="text-xs font-semibold">7. Publish<span class="block font-normal text-base-content/50">YouTube + Multi</span></span></li>
             </ul>
-            <p class="text-center text-xs text-base-content/60">Every run also mirrors its job snapshot to <span class="font-medium text-base-content">Firestore</span> (<code class="rounded-field bg-base-200 px-1">studio_jobs</code>); this pitch page is served by <span class="font-medium text-base-content">Firebase Hosting</span>.</p>
+            <p class="text-center text-xs text-base-content/60">On Cloud Run, jobs, per-call usage costs and agent memory live in <span class="font-medium text-base-content">Firestore</span> (<code class="rounded-field bg-base-200 px-1">studio_jobs</code>, <code class="rounded-field bg-base-200 px-1">studio_usage</code>, <code class="rounded-field bg-base-200 px-1">studio_agent_memory</code>); local runs use SQLite; this pitch page is served by <span class="font-medium text-base-content">Firebase Hosting</span>.</p>
 
             <!-- Agentic AI Harness Highlight Box -->
             <div class="rounded-box border border-primary/30 bg-primary/5 p-2.5">
@@ -169,7 +169,7 @@
                   <p class="text-[10px] font-semibold text-primary uppercase">3-Tier Layered Memory</p>
                   <p class="text-xs text-base-content/80 mt-0.5"><span class="font-medium">Tier 1:</span> Working Memory (Active Plan & Scratchpad)</p>
                   <p class="text-xs text-base-content/80"><span class="font-medium">Tier 2:</span> Checkpoint Memory (JSONL Run Receipts)</p>
-                  <p class="text-xs text-base-content/80"><span class="font-medium">Tier 3:</span> Long-Term SQLite Memory (Rules, Prefs, Facts)</p>
+                  <p class="text-xs text-base-content/80"><span class="font-medium">Tier 3:</span> Long-Term Memory (SQLite locally, Firestore when hosted)</p>
                 </div>
                 <div class="rounded-field bg-base-100 p-2 border border-base-200">
                   <p class="text-[10px] font-semibold text-secondary uppercase">8-Tool Registry</p>
@@ -328,7 +328,7 @@
               <h3 class="card-title text-sm">System capabilities</h3>
               <ul class="flex flex-col gap-1 text-xs text-base-content/70">
                 <li><span class="font-medium text-base-content">Agentic Control Loop.</span> Multi-turn ReAct loop (plan → inspect → score → draft → audit → self-repair).</li>
-                <li><span class="font-medium text-base-content">Layered Memory Engine.</span> Working memory (active plan), checkpoint memory (run receipts), persistent SQLite memory.</li>
+                <li><span class="font-medium text-base-content">Layered Memory Engine.</span> Working memory (active plan), checkpoint memory (run receipts), long-term memory (SQLite locally, Firestore when hosted).</li>
                 <li><span class="font-medium text-base-content">Automated Self-Critique.</span> Pre-render audit detects duplicate headings, layout repetition, and sync drift.</li>
               </ul>
             </div>
@@ -362,7 +362,7 @@
               <div class="rounded-box border border-base-300 bg-base-200 px-2 py-1.5">
                 <p class="text-[10px] font-medium uppercase tracking-wide text-accent">Pillar 3 · Layered Memory</p>
                 <p class="text-xs font-medium">3-Tier Memory Architecture</p>
-                <p class="text-xs text-base-content/70"><code class="rounded-field bg-base-100 px-1">app/agent_memory.py</code>: Working memory (scratchpad), checkpoints, and persistent SQLite long-term storage.</p>
+                <p class="text-xs text-base-content/70"><code class="rounded-field bg-base-100 px-1">app/agent_memory.py</code>: Working memory (scratchpad), checkpoints, and long-term storage (SQLite locally, mirrored to Firestore when hosted).</p>
               </div>
               <div class="rounded-box border border-base-300 bg-base-200 px-2 py-1.5">
                 <p class="text-[10px] font-medium uppercase tracking-wide text-info">Pillar 4 · Observability</p>
