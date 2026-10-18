@@ -38,9 +38,27 @@ _KEEP = (
 
 
 def bucket_name() -> str:
-    from .firestore_sync import _cfg
+    from .firestore_sync import _cfg, hosted
 
-    return _cfg("GCS_BUCKET")
+    # 1. Explicit GCS_BUCKET or FIREBASE_STORAGE_BUCKET from env
+    explicit = _cfg("GCS_BUCKET") or _cfg("FIREBASE_STORAGE_BUCKET")
+    if explicit:
+        return explicit
+
+    # 2. On Cloud Run / hosted, auto-detect the project bucket
+    if hosted():
+        proj = _cfg("GOOGLE_CLOUD_PROJECT") or _cfg("PROJECT_ID") or _cfg("GCP_PROJECT_ID")
+        if not proj:
+            try:
+                from google.cloud import storage
+
+                c = storage.Client()
+                proj = c.project
+            except Exception:
+                pass
+        if proj:
+            return f"{proj}-studio-media"
+    return ""
 
 
 def active() -> bool:
@@ -52,7 +70,8 @@ def _client():
     if _CLIENT is not None or _TRIED:
         return _CLIENT
     _TRIED = True
-    if not bucket_name():
+    name = bucket_name()
+    if not name:
         return None
     try:
         from google.cloud import storage
@@ -120,7 +139,26 @@ def _upload_one(bucket, job_id: str, rel: str, path: Path) -> None:
         return
     media, _ = mimetypes.guess_type(path.name)
     blob = bucket.blob(key)
+    blob.cache_control = "private, max-age=3600"
     blob.upload_from_filename(str(path), content_type=media or "application/octet-stream")
+
+
+def upload_one_now(job_id: str, rel: str, path: Path) -> bool:
+    """Synchronously upload a single file (e.g. on-demand thumbnail, final video)."""
+    if not active():
+        return False
+    client = _client()
+    if client is None:
+        return False
+    name = bucket_name()
+    try:
+        bucket = client.bucket(name)
+        _upload_one(bucket, job_id, rel, path)
+        _LOG.info(f"job {job_id}: uploaded {rel} to gs://{name}")
+        return True
+    except Exception as e:  # noqa: BLE001
+        _LOG.warning(f"job {job_id}: could not upload {rel} to gs://{name}: {e}")
+        return False
 
 
 def sync_workspace(job_id: str, work: Path) -> int:

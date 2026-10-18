@@ -2541,8 +2541,9 @@ function renderArtifacts(job) {
     }
     // After finalize (or before merge), show the retained thumbnail as a preview.
     if (a.thumbnail && thumb) {
+      thumb.onerror = () => { thumb.classList.add("hidden"); };
+      thumb.onload = () => { thumb.classList.remove("hidden"); };
       setStableMediaSrc(thumb, a.thumbnail);
-      thumb.classList.remove("hidden");
     } else if (thumb) {
       thumb.classList.add("hidden");
       if (thumb.getAttribute("src")) thumb.removeAttribute("src");
@@ -2638,13 +2639,15 @@ async function generateThumbnailOnDemand() {
     if (!refresh.ok || !job.id) {
       throw new Error(apiDetail(job, "Thumbnail saved but refresh failed — reload the session."));
     }
-    if (img) {
-      img.removeAttribute("src");
-      img.classList.add("hidden");
-    }
-    renderPublish(job);
-    if (lastJob) lastJob = { ...lastJob, ...job, artifacts: { ...(lastJob.artifacts || {}), ...(job.artifacts || {}) } };
-    renderArtifacts(job);
+    lastJob = {
+      ...(lastJob || {}),
+      ...job,
+      artifacts: { ...(lastJob?.artifacts || {}), ...(job.artifacts || {}) },
+      content: { ...(lastJob?.content || {}), ...(job.content || {}) },
+    };
+    renderPublish(lastJob);
+    renderArtifacts(lastJob);
+    updateYtChecklist();
   } catch (e) {
     if (empty) {
       empty.classList.remove("hidden");
@@ -2692,10 +2695,25 @@ function renderPublish(job) {
   const img = $("thumb-img");
   const empty = $("thumb-empty");
   if (a.thumbnail && img) {
+    img.onerror = () => {
+      img.classList.add("hidden");
+      if (empty) {
+        empty.classList.remove("hidden");
+        dirty = setStableHtml(empty, '<i data-lucide="image-off"></i>Thumbnail loading\u2026') || dirty;
+      }
+    };
+    img.onload = () => {
+      img.classList.remove("hidden");
+      if (empty) empty.classList.add("hidden");
+    };
     // Only change src when the thumbnail path changes (not every SSE cacheBust tick).
     setStableMediaSrc(img, a.thumbnail);
-    img.classList.remove("hidden");
-    if (empty) empty.classList.add("hidden");
+    if (!img.complete || !img.naturalWidth) {
+      // In-flight load
+    } else {
+      img.classList.remove("hidden");
+      if (empty) empty.classList.add("hidden");
+    }
   } else if (img) {
     if (img.getAttribute("src")) img.removeAttribute("src");
     img.classList.add("hidden");

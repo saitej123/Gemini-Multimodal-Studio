@@ -305,6 +305,12 @@ def finalize_job_workspace(job: "Job") -> dict[str, Any]:
 
     write_job_meta(work, job)
     try:
+        from . import blob_store
+
+        blob_store.sync_workspace_async(job.id, work)
+    except Exception:
+        pass
+    try:
         # Persist + notify SSE clients (do not invent content keys).
         store._publish(job)  # noqa: SLF001
     except Exception:

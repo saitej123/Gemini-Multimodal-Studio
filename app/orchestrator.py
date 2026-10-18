@@ -812,6 +812,12 @@ def stage_merge(job: Job) -> None:
                 on_progress=_merge_progress,
             )
         store.set_artifact(job, "video_final", f"/files/{job.id}/{final.name}")
+        try:
+            from . import blob_store
+
+            blob_store.upload_one_now(job.id, final.name, final)
+        except Exception as e:
+            log.bind(task="merge").warning(f"final video storage upload failed: {e}")
         have_audio = any(a is not None for a in audios)
         # Report actual vs requested duration so over/under-runs are visible.
         actual = media._ffprobe_duration(final)
@@ -929,6 +935,12 @@ def _generate_job_thumbnail_inner(job: Job) -> tuple[bool, str]:
         store.set_artifact(job, "thumbnail", f"/files/{job.id}/{path.name}")
         store.set_content(job, "thumbnail", path.name)
         store.set_content(job, "publish_meta_message", f"Thumbnail ready. {thumb_msg}".strip())
+        try:
+            from . import blob_store
+
+            blob_store.upload_one_now(job.id, path.name, path)
+        except Exception as e:
+            log.bind(task="publish-meta").warning(f"thumbnail storage upload failed: {e}")
         log.bind(task="publish-meta").success(f"thumbnail on demand: {path.name}")
         return True, thumb_msg or "Thumbnail generated."
     return False, thumb_msg or "Thumbnail generation failed."

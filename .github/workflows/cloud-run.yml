@@ -56,9 +56,10 @@ jobs:
             --cpu 4 \
             --timeout 3600 \
             --cpu-boost \
-            --concurrency 100 \
-            --max-instances 5 \
-            --update-env-vars "HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,DEMO_PUBLIC=true" \
+            --no-cpu-throttling \
+            --concurrency 160 \
+            --max-instances 2 \
+            --update-env-vars "HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_LITE_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,GEMINI_LIVE_VOICE=Aoede,GEMINI_IMAGE_MODEL=gemini-3-pro-image,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,FIRESTORE_COLLECTION=studio_jobs,FIRESTORE_USAGE_COLLECTION=studio_usage,FIRESTORE_MEMORY_COLLECTION=studio_agent_memory,GOOGLE_CLOUD_PROJECT=studio-512005,GCS_BUCKET=studio-512005-studio-media,COST_STORE=auto,MEMORY_STORE=auto,TOPIC_RESEARCH_ENABLED=true,DEMO_PUBLIC=true" \
             --set-secrets "GEMINI_API_KEY=gemini-api-key:latest,AUTH_ADMIN_PASSWORD=auth-admin-password:latest"
 
       - name: Print service URL
