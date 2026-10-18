@@ -82,7 +82,7 @@ def fill_team(prs) -> None:
     tf = shape.text_frame
     # 0 Team Details (SemiBold 21), 2 name, 3 leader, 4 problem — all Google Sans Flex 18.
     tf.paragraphs[2].runs[0].text = "Team name: Multimodal Studio"
-    tf.paragraphs[3].runs[0].text = "Team leader name: M Sai Teja"
+    tf.paragraphs[3].runs[0].text = "Team leader name: M Sai Teja  |  Team member: Anil Kumar"
     tf.paragraphs[4].runs[0].text = (
         "Problem statement: A teacher still rebuilds a chapter as slides, then records it. "
         "The voice and the picture do not move together, so students get a page read aloud."
@@ -146,12 +146,13 @@ def card(slide, x, y, w, h, *, title="", body="", accent=BLUE, tint=PAPER, num=N
         _face(r, SEMI, title_size, title_color)
         first = False
     if body:
-        p = tf.paragraphs[0] if first else tf.add_paragraph()
-        p.alignment = PP_ALIGN.LEFT
-        p.space_after = Pt(0)
-        r = p.add_run()
-        r.text = body
-        _face(r, REG, body_size, SOFT)
+        for k, part in enumerate(body.split("\n")):
+            p = tf.paragraphs[0] if (first and k == 0) else tf.add_paragraph()
+            p.alignment = PP_ALIGN.LEFT
+            p.space_after = Pt(4 if "\n" in body else 0)
+            r = p.add_run()
+            r.text = part
+            _face(r, REG, body_size, SOFT)
     _fits((title + "\n" if title else "") + body, inner_w, max(title_size, body_size) if not body else body_size, avail, f"card[{title or body[:20]}]")
     if num is not None:
         badge(slide, x + pad, y + pad * 0.7, str(num), accent)
@@ -242,14 +243,14 @@ def s_brief(slide) -> None:
     for i, (t, b, c, tint) in enumerate(cols):
         card(slide, 0.32 + i * 3.16, 2.78, 3.04, 1.95, title=t, body=b, accent=c, tint=tint, num=i + 1,
              title_size=15, body_size=12, line=None)
-    label(slide, 0.32, 4.92, 9.36, 0.3, "Built by M Sai Teja (team leader) with Anil Kumar.", size=11, color=MUTED)
+    label(slide, 0.32, 4.92, 9.36, 0.3, "Team: M Sai Teja (leader, built the app) and Anil Kumar.", size=11, color=MUTED)
 
 
 def s_opportunity(slide) -> None:
     items = [
         ("Different from what exists", "Slide tools stop at the deck. Read-aloud tools ignore the picture. Neither gives a class a finished video that looks made for the lesson.", BLUE, BLUE_T),
         ("How it fixes ed-tech drop-off", "Students leave static decks and flat read-alouds. Here the look changes with the lesson, the screen moves with the voice, and the pen draws as it explains.", RED, RED_T),
-        ("USP", "Voice, highlight and hand-drawn strokes move together, point by point. Each template is built differently, not just recoloured.", GREEN, GREEN_T),
+        ("USP: a voice-led lesson", "Voice, highlight and hand-drawn strokes move together, point by point. Each look is built differently, not recoloured. Strongest where students listen: revision, training, language practice.", GREEN, GREEN_T),
     ]
     for i, (t, b, c, tint) in enumerate(items):
         card(slide, 0.32 + i * 3.16, 2.45, 3.04, 2.75, title=t, body=b, accent=c, tint=tint, num=i + 1,
@@ -346,14 +347,24 @@ def s_tech(slide) -> None:
 
 
 def s_cost(slide) -> None:
-    items = [
-        ("No GPU", "Every model call goes to Gemini. The looks and drawn animation are plain CSS, so they add no cost."),
-        ("Free tier", "Cloud Run and Firestore stay free at review traffic."),
-        ("A few rupees", "One normal video on Gemini Flash costs a few rupees."),
+    # Per-video figures: the app's own estimator (app/costs.py, Admin > Costs rate table).
+    # Voice at ~32 audio tokens/s on 3.8 Live; slide text on 3.8 Flash. Rupees at 88 per $.
+    sizes = [("1 min", "About Rs 4", "$0.04"), ("3 min", "About Rs 9", "$0.10"),
+             ("5 min", "About Rs 14", "$0.15"), ("10 min", "About Rs 26", "$0.30")]
+    for i, (n, rs, usd) in enumerate(sizes):
+        c, tint = PALETTE[i]
+        card(slide, 0.32 + i * 2.385, 1.45, 2.2, 1.15, title=rs.replace("Rs ", "\u20b9"),
+             body=f"{n} video, {usd}", accent=c, tint=tint, title_size=20, body_size=12, line=None, pad=0.16)
+    rest = [
+        ("Where it goes", "Voice is about 73%, slide writing 16%, planning and notes 10%. Voice is the lever, so voice choice matters most.", RED, RED_T),
+        ("Logged, not guessed", "Admin > Costs records every call: model, tokens and dollars, per job and per day. Two live voice tests so far: $0.002.", BLUE, BLUE_T),
+        ("Hosting about \u20b90", "No GPU. Cloud Run and Firestore stay in the free tier at review traffic. Looks and drawn motion are CSS, no model call.", GREEN, GREEN_T),
     ]
-    for i, (t, b) in enumerate(items):
-        c, tint = PALETTE[[0, 3, 2][i]]
-        card(slide, 0.32 + i * 3.16, 1.75, 3.04, 2.5, title=t, body=b, accent=c, tint=tint, title_size=22, body_size=13, line=None, pad=0.2)
+    for i, (t, b, c, tint) in enumerate(rest):
+        card(slide, 0.32 + i * 3.16, 2.75, 3.04, 1.8, title=t, body=b, accent=c, tint=tint, title_size=14, body_size=12, line=None)
+    pill(slide, 0.32, 4.7, 9.36, 0.5,
+         "Estimates from the dashboard's rate table, at \u20b988 per $. Flash intro rates end 31 Dec 2026; a 3 min video is then about \u20b911.",
+         tint=INK, color=WHITE, size=11)
 
 
 def s_shots(slide) -> None:
@@ -377,18 +388,95 @@ def s_perf(slide) -> None:
              title_size=14, body_size=12.5, line=None)
 
 
+def _title_like(src_slide, dst_slide, text: str) -> None:
+    """Copy the template's own title box so the extra slides match slide 13."""
+    import copy
+    for sh in src_slide.shapes:
+        if sh.has_text_frame and sh.text_frame.text.startswith("Additional Details"):
+            el = copy.deepcopy(sh._element)
+            dst_slide.shapes._spTree.append(el)
+            new = dst_slide.shapes[-1]
+            new.text_frame.paragraphs[0].runs[0].text = text
+            return
+
+
 def s_future(slide) -> None:
     items = [
-        ("Built: six unique looks", "Whiteboard, notebook, poster, editorial, broadcast and bento. Structure, font and motion differ, not only colour."),
-        ("Built: hand-drawn motion", "Underlines and doodles draw themselves, and a marker sweeps under the point being explained."),
-        ("Next: Manim-style motion", "Animated formulas and graphs when the chapter has maths."),
-        ("Next: questions mid-video", "A pause with a question after each section, so students answer instead of only watching."),
+        ("Built today", "Six looks, hand-drawn strokes, type sized to fit, and a highlight that follows the voice.", GREEN, GREEN_T),
+        ("More animation", "Charts and arrows that build step by step, Manim-style formulas, a pen that circles key words, short moves between sections.", BLUE, BLUE_T),
+        ("More engaging content", "A question after each section, a one-line recap card, a 'try it' prompt, and an optional quiz at the end.", RED, RED_T),
+        ("Better voice", "A voice per subject, more languages, and a slower pace for younger classes.", YELLOW, YELLOW_T),
+        ("A closing that lands", "Every video ends on a recap, one question and one next step.", GREEN, GREEN_T),
+        ("Learn from use", "Admin > Costs and the job logs show slow or costly steps. We tune those first and keep what teachers replay.", BLUE, BLUE_T),
     ]
-    for i, (t, b) in enumerate(items):
-        c, tint = PALETTE[[3, 3, 0, 1][i]]
+    for i, (t, b, c, tint) in enumerate(items):
+        r, col = divmod(i, 3)
+        card(slide, 0.32 + col * 3.16, 1.5 + r * 1.78, 3.04, 1.66, title=t, body=b, accent=c, tint=tint, num=i + 1,
+             title_size=13, body_size=11.5, line=None, pad=0.14)
+
+
+def s_future_modes(slide) -> None:
+    label(slide, 0.32, 1.42, 2.0, 0.3, "Pick one, or both:", size=12, face=SEMI, color=INK)
+    for i, (t, tint) in enumerate([("Template", BLUE_T), ("No template", RED_T), ("Skill", YELLOW_T), ("Template + skill", GREEN_T)]):
+        pill(slide, 2.0 + i * 1.92, 1.4, 1.8, 0.34, t, tint=tint, size=11)
+    card(slide, 0.32, 1.92, 4.6, 3.1, title="Add a new template", num=1, accent=BLUE, tint=BLUE_T, line=None,
+         title_size=15, body_size=12.5,
+         body="1. Add one style entry: a name, a font pair and colours (video_options.py).\n"
+              "2. Map it to a layout family: split, band, sketch, poster, bento or notebook. A new family is one block of CSS (edu_theme.py).\n"
+              "3. It shows up in the style picker. Run the sample preview and check fit in 16:9, 9:16 and square.\n"
+              "No change to the pipeline: slides, voice and capture stay the same.")
+    items = [
+        ("No template", "Auto already matches a layout to the document. A template-free layout builder is written; we keep it off until it never overflows.", RED, RED_T),
+        ("Skill option", "An animation skill picks the motion per slide. The HyperFrames group is in the picker today.", YELLOW, YELLOW_T),
+        ("Both", "One switch on the Studio page: a template for the look, a skill for the motion, or none of either.", GREEN, GREEN_T),
+    ]
+    for i, (t, b, c, tint) in enumerate(items):
+        card(slide, 5.08, 1.92 + i * 1.06, 4.6, 0.98, title=t, body=b, accent=c, tint=tint, title_size=12.5, body_size=10.5, pad=0.13, line=None)
+
+
+def s_future_use(slide) -> None:
+    items = [
+        ("Voice", "Gemini 3.8 Live speaks every slide. Strongest where students listen: revision clips, commutes, language practice. Next: more voices and languages.", BLUE, BLUE_T),
+        ("Closing", "End on a recap, a question and one next step. A clean close is what brings a student back for the next lesson.", GREEN, GREEN_T),
+        ("Avatar", "Next: a presenter avatar for the intro and the closing, with many to choose from, so students see a face as well as hear a voice.", RED, RED_T),
+        ("Who gains most", "Teachers with no time to record, coaching classes, company onboarding, and creators turning a chapter into Shorts.", YELLOW, YELLOW_T),
+    ]
+    for i, (t, b, c, tint) in enumerate(items):
         r, col = divmod(i, 2)
-        card(slide, 0.32 + col * 4.76, 1.5 + r * 1.85, 4.6, 1.7, title=t, body=b, accent=c, tint=tint, num=i + 1,
-             title_size=14, body_size=12.5, line=None)
+        card(slide, 0.32 + col * 4.76, 1.5 + r * 1.65, 4.6, 1.52, title=t, body=b, accent=c, tint=tint, num=i + 1,
+             title_size=14, body_size=12, line=None)
+    pill(slide, 0.32, 4.85, 9.36, 0.42, "Our edge: voice, pen and highlight in time. Next: a face that opens and closes the lesson.",
+         tint=INK, color=WHITE, size=12)
+
+
+def clone_chrome(prs, src_slide):
+    """New slide with the same header/footer pictures as src_slide (no content)."""
+    import copy
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    new = prs.slides.add_slide(src_slide.slide_layout)
+    for sh in list(new.shapes):
+        sh._element.getparent().remove(sh._element)
+    for sh in src_slide.shapes:
+        if sh.has_text_frame and sh.text_frame.text.strip():
+            continue
+        el = copy.deepcopy(sh._element)
+        for blip in el.iter(f"{A}blip"):
+            rid = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+            if rid:
+                part = src_slide.part.related_part(rid)
+                blip.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed",
+                         new.part.relate_to(part, RT.IMAGE))
+        new.shapes._spTree.append(el)
+    return new
+
+
+def move_after(prs, slide, after) -> None:
+    lst = prs.slides._sldIdLst
+    ids = list(lst)
+    by_slide = {s.slide_id: e for s, e in zip(prs.slides, ids)}
+    el = by_slide[slide.slide_id]
+    lst.remove(el)
+    lst.insert(list(lst).index(by_slide[after.slide_id]) + 1, el)
 
 
 def s_links(prs) -> None:
@@ -431,10 +519,21 @@ def main() -> None:
         ("Estimated implementation cost", s_cost),
         ("Snapshots of the prototype", s_shots),
         ("Prototype Performance", s_perf),
-        ("Additional Details", s_future),
     ]:
         slide, _ = find(prs, needle)
         fn(slide)
+    fut, _ = find(prs, "Additional Details")
+    s_future(fut)
+    modes = clone_chrome(prs, fut)
+    _title_like(fut, modes, "Additional Details: add a look, or use none")
+    s_future_modes(modes)
+    move_after(prs, modes, fut)
+    blank = [sl for sl in prs.slides
+             if not any(sh.has_text_frame and sh.text_frame.text.strip() for sh in sl.shapes)
+             and len(sl.shapes) == 3][0]
+    _title_like(fut, blank, "Additional Details: where it helps most")
+    s_future_use(blank)
+    move_after(prs, blank, modes)
     s_links(prs)
 
     prs.save(OUT)
