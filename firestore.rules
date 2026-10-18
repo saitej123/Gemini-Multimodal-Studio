@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Job snapshots are written by the Cloud Run service account, not browsers.
+    match /studio_jobs/{jobId} {
+      allow read, write: if false;
+    }
+  }
+}

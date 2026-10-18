@@ -1,0 +1,45 @@
+# Build the studio image and deploy it to Cloud Run.
+# Secrets are NOT in this file. Create them first (see the hosting steps):
+#   gemini-api-key, auth-admin-password
+# --update-env-vars merges, so a later build does not wipe those secrets.
+# DEMO_PUBLIC=true opens the judging link with no login.
+timeout: 2400s
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:$BUILD_ID
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:latest
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - multimodal-studio
+      - --image=us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:$BUILD_ID
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=4Gi
+      - --cpu=2
+      - --execution-environment=gen2
+      - --timeout=3600
+      - --cpu-boost
+      - --concurrency=1
+      - --max-instances=1
+      - --update-env-vars=HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,DEMO_PUBLIC=true
+      - --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUTH_ADMIN_PASSWORD=auth-admin-password:latest
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:$BUILD_ID
+  - us-central1-docker.pkg.dev/$PROJECT_ID/multimodal/studio:latest

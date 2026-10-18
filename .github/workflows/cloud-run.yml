@@ -1,0 +1,72 @@
+# Deploy the public GitHub repo to Cloud Run on every push to main.
+#
+# Repository secrets (Settings → Secrets → Actions):
+#   GCP_PROJECT_ID          Google Cloud project id
+#   GCP_SA_KEY              JSON key for a deployer service account
+#   GEMINI_API_KEY          Gemini API key, stored only as a GitHub secret
+#   AUTH_ADMIN_PASSWORD     Password for the bootstrap admin (not the source default)
+#
+# The deployer account needs Cloud Run Admin, Artifact Registry Writer,
+# and Service Account User. One-time setup:
+#   gcloud artifacts repositories create multimodal \
+#     --repository-format=docker --location=us-central1
+name: Deploy Cloud Run
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  REGION: us-central1
+  SERVICE: multimodal-studio
+  IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/multimodal/studio
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push
+        run: |
+          docker build -t "$IMAGE:${GITHUB_SHA}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${GITHUB_SHA}"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --image "$IMAGE:${GITHUB_SHA}" \
+            --region "$REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --execution-environment gen2 \
+            --memory 4Gi \
+            --cpu 2 \
+            --timeout 3600 \
+            --cpu-boost \
+            --concurrency 1 \
+            --max-instances 1 \
+            --update-env-vars "HOST=0.0.0.0,RELOAD=0,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-3.8-flash,GEMINI_VISION_MODEL=gemini-3.8-flash,GEMINI_TTS_MODEL=gemini-3.8-live,GEMINI_TTS_VOICE=Kore,INTERVIEW_LIVE_MODEL=gemini-3.8-live,FIRESTORE_ENABLED=true,DEMO_PUBLIC=true,GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},AUTH_ADMIN_PASSWORD=${{ secrets.AUTH_ADMIN_PASSWORD }}"
+
+      - name: Print service URL
+        run: |
+          gcloud run services describe "$SERVICE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "$REGION" \
+            --format='value(status.url)'

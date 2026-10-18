@@ -1,0 +1,18 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "pitch",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/app/**",
+        "run": {
+          "serviceId": "multimodal-studio",
+          "region": "us-central1"
+        }
+      }
+    ]
+  }
+}
