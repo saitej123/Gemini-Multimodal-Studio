@@ -3431,21 +3431,9 @@ function stagesSnap(job) {
 }
 
 function getStageLookState() {
-  const style = $("stage-look-style");
-  const theme = $("stage-look-theme");
-  const voice = $("stage-look-voice");
-  const layout = $("stage-look-layout");
-  const age = $("stage-look-age");
-  const knowledge = $("stage-look-knowledge");
-  if (!style && !theme && !voice && !layout) return null;
-  return {
-    style: style?.value,
-    theme: theme?.value,
-    voice: voice?.value,
-    layout: layout?.value,
-    age_group: age?.value,
-    knowledge_level: knowledge?.value,
-  };
+  const note = $("stage-post-note");
+  if (!note) return null;
+  return { note: note.value };
 }
 
 function jobVoiceSelectValue(job) {
@@ -3465,118 +3453,35 @@ function stageVoiceOptionsHtml(selected) {
 }
 
 function stageLookControlsHtml(job, preserved) {
+  const c = (job && job.content) || {};
   const o = (job && job.options) || {};
-  const styleVal = (preserved?.style ?? o.video_style) || selectedStyle || "auto";
-  const themeVal = (preserved?.theme ?? o.video_theme) || selectedTheme || "auto";
-  const layoutVal = (preserved?.layout ?? o.content_layout) || "auto";
-  const ageVal = (preserved?.age_group ?? o.age_group) || currentAgeGroup() || "auto";
-  const knowVal = (preserved?.knowledge_level ?? o.knowledge_level) || currentKnowledgeLevel() || "auto";
-  const voiceVal = preserved?.voice ?? jobVoiceSelectValue(job);
-
-  const styleOpts = [
-    `<option value="auto"${styleVal === "auto" ? " selected" : ""}>Auto — match document</option>`,
-    ...(videoStyles || [])
-      .filter((s) => s.key && s.key !== "auto")
-      .map((s) =>
-        `<option value="${escapeHtml(s.key)}"${s.key === styleVal ? " selected" : ""}>` +
-        `${escapeHtml(s.label || s.key)}</option>`
-      ),
-  ].join("");
-  const themeOpts = (videoThemes || []).map((t) =>
-    `<option value="${escapeHtml(t.key)}"${t.key === themeVal ? " selected" : ""}>` +
-    `${escapeHtml(t.label || t.key)}</option>`
-  ).join("");
-  const layoutOpts = [
-    ["auto", "Auto — match document"],
-    ["teaching", "Teach — steps / flow"],
-    ["story", "Story — hook / quote"],
-    ["ppt", "PPT deck — Gamma"],
-    ["modern_ppt", "Modern PPT"],
-    ["hyper", "Hyper · design"],
-    ["motion", "Motion · Remotion"],
-    ["content", "Content · layouts"],
-    ["diagram", "Diagram-heavy"],
-    ["dense", "Dense brief"],
-  ].map(([k, lab]) =>
-    `<option value="${k}"${k === layoutVal ? " selected" : ""}>${escapeHtml(lab)}</option>`
-  ).join("");
-  const ageOpts = [
-    ["auto", "Auto — from document or prompt"],
-    ["kids", "Kids (5–8)"],
-    ["tweens", "Tweens (9–12)"],
-    ["teens", "Teens (13–17)"],
-    ["young_adults", "Young adults (18–24)"],
-    ["adults", "Adults"],
-    ["professionals", "Professionals"],
-    ["all_ages", "All ages / family"],
-  ].map(([k, lab]) =>
-    `<option value="${k}"${k === ageVal ? " selected" : ""}>${escapeHtml(lab)}</option>`
-  ).join("");
-  const knowOpts = [
-    ["auto", "Auto — from document or prompt"],
-    ["beginner", "Beginner"],
-    ["intermediate", "Intermediate"],
-    ["advanced", "Advanced"],
-    ["expert", "Expert"],
-  ].map(([k, lab]) =>
-    `<option value="${k}"${k === knowVal ? " selected" : ""}>${escapeHtml(lab)}</option>`
-  ).join("");
-
+  const note = preserved?.note ?? c.review_notes ?? o.review_notes ?? "";
   return `
-    <div class="stage-look" data-stage-look="1">
-      <div class="stage-look-title"><i data-lucide="sliders-horizontal"></i> Style &amp; voice for rebuild</div>
-      <p class="stage-look-hint">Applies to this job (upload or cron). Locked for slide rebuild — change anytime before Save &amp; rebuild / Regenerate.</p>
-      <div class="stage-look-grid">
-        <label class="stage-look-field">
-          <span>Visual style</span>
-          <select id="stage-look-style" class="text-input stage-look-select">${styleOpts}</select>
-        </label>
-        <label class="stage-look-field">
-          <span>Colors</span>
-          <select id="stage-look-theme" class="text-input stage-look-select">${themeOpts}</select>
-        </label>
-        <label class="stage-look-field">
-          <span>Narration voice</span>
-          <select id="stage-look-voice" class="text-input stage-look-select">${stageVoiceOptionsHtml(voiceVal)}</select>
-        </label>
-        <label class="stage-look-field">
-          <span>Content layout</span>
-          <select id="stage-look-layout" class="text-input stage-look-select">${layoutOpts}</select>
-        </label>
-        <label class="stage-look-field">
-          <span>Age group</span>
-          <select id="stage-look-age" class="text-input stage-look-select">${ageOpts}</select>
-        </label>
-        <label class="stage-look-field">
-          <span>Knowledge</span>
-          <select id="stage-look-knowledge" class="text-input stage-look-select">${knowOpts}</select>
-        </label>
-      </div>
-    </div>`;
+    <label class="stage-post-note">
+      <span>Notes for the next slide build</span>
+      <textarea id="stage-post-note" class="text-input" rows="2" placeholder="Optional. Example: skip the intro, keep the numbers, shorter lines.">${escapeHtml(note)}</textarea>
+    </label>`;
 }
 
 function collectStageLookPatch() {
-  const style = $("stage-look-style")?.value;
-  const theme = $("stage-look-theme")?.value;
-  const layout = $("stage-look-layout")?.value;
-  const voiceRaw = $("stage-look-voice")?.value || "";
+  // Rebuild uses the controls on the left, so style, voice, and audience
+  // stay in step with the form. There is no second row of dropdowns.
   const patch = {};
-  if (style) patch.video_style = style;
-  if (theme) patch.video_theme = theme;
+  const layout = $("content-layout")?.value;
   if (layout) patch.content_layout = layout;
-  const age = $("stage-look-age")?.value;
-  const knowledge = $("stage-look-knowledge")?.value;
+  const age = currentAgeGroup();
+  const knowledge = currentKnowledgeLevel();
   if (age) patch.age_group = age;
   if (knowledge) patch.knowledge_level = knowledge;
-  if (!audiencePromptDirty && age && knowledge) {
-    patch.custom_prompt = loadedAudiencePrompt(age, knowledge);
-  } else {
-    const custom = currentCustomPrompt();
-    if (custom) patch.custom_prompt = custom;
-  }
-  const notes = currentReviewNotes();
+  if (selectedStyle) patch.video_style = selectedStyle;
+  if (selectedTheme) patch.video_theme = selectedTheme;
+  const voice = typeof currentGeminiVoice === "function" ? currentGeminiVoice() : "";
+  if (voice) patch.gemini_voice = voice;
+  const custom = currentCustomPrompt();
+  if (custom) patch.custom_prompt = custom;
+  const typed = $("stage-post-note");
+  const notes = typed ? typed.value.trim() : currentReviewNotes();
   if (notes) patch.review_notes = notes;
-  if (voiceRaw) patch.gemini_voice = voiceRaw;
   return patch;
 }
 

@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Turn any document into a narrated, publish-ready video.</strong><br>
-  Drop a paper, notes, or slides → pick a platform → Gemini writes the lesson, Gemini TTS speaks it, Cloud Run serves the app.
+  Drop a chapter, notes, or a topic → pick who it is for → Gemini writes the slides, Gemini 3.8 Live speaks them, Cloud Run serves the app.
 </p>
 
 <p align="center">
@@ -33,7 +33,13 @@
 
 **Pitch deck:** `Template/Out/Multimodal Studio - AI Builder Cup.pptx` (filled from the official template).
 
-**What we built.** Multimodal Studio compiles a PDF, Word file, deck, notes, image, or topic into a narrated explainer. Gemini 3.8 Flash (or Gemini 4 Argon) reads the source and writes the slides. Gemini TTS narrates. Gemini 3.8 Live is the in-app assistant. Nano Banana draws the thumbnail.
+**What we built.** Multimodal Studio turns a chapter, notes, or a topic into a video a student can replay. Gemini 3.8 Flash (or Gemini 4 Argon) reads the source and writes the slides. Gemini 3.8 Live speaks them, with pauses instead of a flat read-aloud. The highlight walks with the sentence, which is the part that makes it feel like a person explaining.
+
+**Who it is for.** A teacher who does not want to rebuild every PDF as slides. A tutor. A student revising. A parent walking through homework. The same path also fits a creator, but the first job is learning that is actually watchable.
+
+**Live now.** GitHub: https://github.com/saitej123/Gemini-Multimodal-Studio · App: https://multimodal-studio-469528918286.us-central1.run.app (no login).
+
+**What we want next.** A simpler Studio. Handwritten teaching templates. Manim-style motion for formulas. Predefined YouTuber looks and a custom one. Better animation models, both shipped and added by the teacher. New animation skills you can pick the way you pick a style today.
 
 **How the required products are used.**
 
@@ -44,16 +50,16 @@
 | **Firebase** | Hosting serves `pitch/` and can rewrite `/app` to the Cloud Run service (`firebase.json`). |
 | **Firestore** | `FIRESTORE_ENABLED=true` mirrors each job snapshot into `studio_jobs` (`app/firestore_sync.py`). Browser writes are denied (`firestore.rules`). |
 
-**Hosted demo link (no login).** Set `DEMO_PUBLIC=true` on the Cloud Run service and judges land straight in Studio with a shared demo identity — no sign-in screen (`/login` redirects to `/`). Local runs keep invite-only sign-in.
+**Hosted demo link (no login).** `DEMO_PUBLIC=true` is set on Cloud Run. Reviewers land in Studio. Local runs keep invite-only sign-in.
 
-**Links that must be public before you upload the deck.** This workspace has no git remote and no `gcloud` login, so these URLs are not live yet. Paste them into slide 14, then keep them up for the whole evaluation.
+**Public links** (keep these up through review). The demo video is the one item still to record: 3 to 4 minutes, one real file becoming an MP4.
 
 | Required item | Rule | Where it comes from |
 | --- | --- | --- |
 | Pitch deck | Use the prescribed template | `Template/Out/Multimodal Studio - AI Builder Cup.pptx` |
 | Demo video | 3 to 4 minutes, showing a real run | Record: sign in, drop a short PDF, pick Kore, run, play the MP4. Do not exceed 4:00. |
-| Deployed prototype | Must stay up during judging | `gcloud builds submit --config deploy/cloudbuild.yaml`, then the Cloud Run URL |
-| GitHub repository | Public source for the whole evaluation | Push this project to a public GitHub repo. `.github/workflows/cloud-run.yml` deploys it. |
+| Deployed prototype | Must stay up during judging | https://multimodal-studio-469528918286.us-central1.run.app |
+| GitHub repository | Public source for the whole evaluation | https://github.com/saitej123/Gemini-Multimodal-Studio |
 
 Set `GEMINI_API_KEY` on the Cloud Run service from Secret Manager. Do not commit `.env`.
 
@@ -160,7 +166,7 @@ flowchart TD
     end
 
     subgraph VideoPipeline["4. Deterministic Media Synthesis"]
-        Narrate["Voiceover Synthesis<br/>(Gemini TTS)"]
+        Narrate["Voiceover Synthesis<br/>(Gemini 3.8 Live)"]
         Capture["Frame-Seeking Capture<br/>(Playwright Headless Chromium)"]
         Merge["Audio-Video Merge<br/>(FFmpeg Synced MP4)"]
         Publish["Publish Pack & Multi-Platform<br/>(YouTube, Instagram, LinkedIn, TikTok)"]
@@ -207,7 +213,7 @@ flowchart TD
 <p align="center">
   <img src="docs/screenshots/harness-flowchart.png" alt="Agentic AI Architecture Flowchart" width="100%">
 </p>
-<p align="center"><sub><strong>Architecture Flowchart</strong> — Hosted demo or upload ➔ VLM Extract ➔ ReAct Agent Harness (3 Memory Tiers + 8 Tool Registry) ➔ Deterministic Media Synthesis (Gemini TTS, Playwright, FFmpeg) ➔ Firestore mirror.</sub></p>
+<p align="center"><sub><strong>Architecture Flowchart</strong> — Hosted demo or upload, then extract, slides, Gemini 3.8 Live, capture, and a Firestore copy of the job.</sub></p>
 
 <table>
   <tr>

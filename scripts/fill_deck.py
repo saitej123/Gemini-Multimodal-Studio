@@ -91,11 +91,12 @@ def fill_team(prs) -> None:
     # 0 Team Details (SemiBold 21), 2 name, 3 leader, 4 problem — all Google Sans Flex 18.
     tf.paragraphs[2].runs[0].text = "Team name: Multimodal Studio"
     tf.paragraphs[3].runs[0].text = (
-        "Team leader name: Anil Kumar, anil8860556664@gmail.com"
+        "Team leader: Anil Kumar  ·  anil8860556664@gmail.com"
     )
     tf.paragraphs[4].runs[0].text = (
-        "Problem statement: M Sai Teja, macharlasaiteja@gmail.com. "
-        "We remade each PDF as slides, then recorded the voice ourselves."
+        "Member: M Sai Teja  ·  macharlasaiteja@gmail.com.  "
+        "A chapter still becomes slides by hand, then a recording. "
+        "Students get a flat read-aloud. We wanted a video they would actually replay."
     )
 
 
@@ -169,9 +170,9 @@ def main() -> None:
     write(
         brief,
         [
-            "Anil and Teja kept doing the same job. Read a PDF, rebuild it as slides, then sit and record. This is the shortcut we actually wanted.",
-            "You drop a PDF, a Word file, a deck, or just a topic. You say who it is for. You get a video back, with a voice already on it.",
-            "Gemini writes the lesson. Gemini 3.8 Live speaks it, with pauses and a change of tone, not a station announcement. The hosted link opens straight into the app. No account.",
+            "Anil Kumar leads the team. M Sai Teja builds with him. We kept turning chapters into slides and then sitting down to record.",
+            "Multimodal Studio is for a teacher, a tutor, or a student who wants the idea to stick. Drop the PDF or the notes, say the age, and you get a video with a voice already on it.",
+            "The fun is in the timing. The highlight moves when the sentence does, so it feels like someone explaining, not a page being read out. Gemini writes it. Gemini 3.8 Live speaks it. The review link opens with no login.",
         ],
     )
 
@@ -180,11 +181,11 @@ def main() -> None:
         opp,
         [
             ("How it is different", SEMI, 14),
-            "A slide tool stops at the slides. A text-to-speech box reads whatever you paste, in one tone. We were still doing the joining ourselves. This goes from the file to something you can post.",
+            "Slide tools stop at the deck. Read-aloud tools stay in one tone and ignore the picture. A teacher was still doing the joining. This goes from the file to a video a class can replay.",
             ("How it solves it", SEMI, 14),
-            "The middle is the part that ate the evening: slides, a voice, and timing so the highlight moves when the sentence does. That middle is the product.",
-            ("What we would actually defend", SEMI, 14),
-            "One Gemini key. A voice that sounds like a person talking. A link a reviewer can open without signing up.",
+            "The slow part was the middle: slides a student can follow, a voice with some life in it, and a highlight that walks with the sentence. That middle is the product.",
+            ("What we would defend", SEMI, 14),
+            "One Gemini key. A voice that does not sound like a station announcement. A link anyone on the review team can open.",
         ],
         top=2.32,
         height=3.05,
@@ -195,12 +196,12 @@ def main() -> None:
     write(
         feats,
         [
-            "YouTube, Shorts, Reels, TikTok, a square post, or LinkedIn. The length follows the place you are posting to.",
-            "Eight Gemini Live voices. Kore is the one in the demo. Preview it first.",
-            "Say the age and how much the viewer already knows. You can rewrite that note.",
-            "A long PDF can be split into topics, then one video or a few.",
-            "It flags a slide that repeats the one before it, and it keeps the on-screen highlight with the voice.",
-            "Title, description, and thumbnail come out with the file. YouTube upload is there if you connect an account.",
+            "A teacher can turn one chapter into a YouTube lesson, a Short, or a Reel. The length follows the format.",
+            "Age and how much the viewer already knows change the wording. A class of 16-year-olds does not get the same script as a beginner.",
+            "Gemini 3.8 Live speaks it. Kore is the demo voice. You can preview before you run.",
+            "A long PDF can be split into topics, then one video or a few, so a unit does not have to be one 40-minute file.",
+            "It flags a slide that repeats the one before it, and the on-screen highlight stays with the voice.",
+            "Title, description, and thumbnail come out with the file.",
         ],
         size=13,
     )
@@ -288,8 +289,10 @@ def main() -> None:
     write(
         later,
         [
-            "The next slide still needs three real URLs. We will paste them and leave them up for the whole review.",
-            "After that: cut a Short out of the long video without doing it by hand, and speak the same lesson in another language.",
+            "Next we want the Studio to feel more obvious: fewer choices, a clearer next step, and the look of the slides kept in step with the style you picked.",
+            "Handwritten teaching templates, separate from the board we have now, so a maths or science idea can look drawn rather than typed.",
+            "Manim-style motion for formulas. Predefined YouTuber looks, plus a custom one. Better animation models, both the ones we ship and ones a teacher can add.",
+            "New animation skills you can drop in, the way a style is picked today. A Short cut from the long lesson without doing it by hand.",
         ],
     )
 
@@ -298,9 +301,10 @@ def main() -> None:
     shape.height = Inches(4.2)
     tf = shape.text_frame
     notes = [
-        "GitHub: public repo URL goes on this line once it is pushed. It has to stay up through review.",
-        "Demo video: 3 to 4 minutes of one real file becoming an MP4. Not a tour of menus. Link goes here.",
-        "Product: the Cloud Run link. It opens in Studio. There is no login on that link.",
+        "GitHub: https://github.com/saitej123/Gemini-Multimodal-Studio",
+        "Demo video: 3 to 4 minutes of one real file becoming an MP4. Link still to be pasted.",
+        "Product: https://multimodal-studio-469528918286.us-central1.run.app",
+        "That link opens in Studio. There is no login.",
     ]
     for text in notes:
         p = tf.add_paragraph()

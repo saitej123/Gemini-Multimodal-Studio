@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.5
     llm_timeout_seconds: float = 600.0
-    # Max Gemini calls to run at once. 0 = the default of 4.
-    llm_max_parallel: int = 4
+    # Max Gemini calls to run at once. 0 = 2, so a slide build is less likely to hit "Rate exceeded".
+    llm_max_parallel: int = 3
     # VLM page extraction: small page-groups so one call is not handed a huge
     # multi-image prompt. Groups run in parallel up to llm_max_parallel.
     vlm_pages_per_call: int = 2
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     def effective_llm_parallel(self) -> int:
         """How many Gemini calls may run at once."""
         n = int(self.llm_max_parallel or 0)
-        return n if n > 0 else 4
+        return n if n > 0 else 2
 
     # --- Authentication (invite-only) ---
     # Bootstrap admin is controlled by AUTH_ADMIN_* in .env (synced on startup).

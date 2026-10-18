@@ -8,6 +8,7 @@ The rest of the pipeline only calls :func:`generate_text` and
 from __future__ import annotations
 
 import base64
+import re
 import random
 import time
 from pathlib import Path
@@ -83,40 +84,68 @@ def _response_text(response) -> str:
     return "".join(chunks)
 
 
+def _rate_limited(exc: BaseException | None) -> bool:
+    msg = str(exc or "").lower()
+    return any(
+        token in msg
+        for token in ("429", "rate", "resource_exhausted", "quota", "too many requests")
+    )
+
+
+def _retry_wait(exc: BaseException | None, attempt: int, base: float) -> float:
+    """Seconds to wait. Rate-limit responses name their own delay when they can."""
+    if _rate_limited(exc):
+        match = re.search(r"retry in\s+([0-9.]+)\s*s", str(exc or ""), re.I)
+        if match:
+            return min(90.0, float(match.group(1)) + 1.0)
+        return min(75.0, 15.0 * (2 ** attempt))
+    return base * (2 ** attempt) + random.uniform(0, base * 0.5)
+
+
 def _retryable(fn, *, task: str, provider: str, model: str):
-    """Run ``fn`` with exponential backoff on transient failures.
+    """Run ``fn`` with backoff on transient failures.
 
     A single attempt that returns an EMPTY string is treated as a soft failure
-    and retried too (local models occasionally burn tokens on reasoning and
-    return nothing). Never swallows the final error — the caller decides how to
-    degrade (e.g. fall back to a template).
+    and retried too. Rate-limit errors ("Rate exceeded") wait longer and get
+    extra attempts so a burst does not kill the slide build.
     """
     settings = get_settings()
     attempts = max(1, int(settings.llm_max_retries))
     base = float(settings.llm_retry_base_delay)
     last_exc: Exception | None = None
-    for i in range(attempts):
+    i = 0
+    while i < attempts:
         try:
             out = fn()
             if out and out.strip():
                 return out
-            # Empty output: retry (unless it was the last attempt).
             last_exc = LLMError("model returned empty content")
             if i < attempts - 1:
                 log.bind(task=task).warning(
-                    f"empty response ({provider}/{model}), retry {i + 1}/{attempts - 1}"
+                    f"empty response ({provider}/{model}), retry {i + 1}"
                 )
         except Exception as e:  # noqa: BLE001 - classify + backoff below
             last_exc = e
+            if _rate_limited(e):
+                attempts = max(attempts, 6)
             if i < attempts - 1:
                 log.bind(task=task).warning(
                     f"{provider}/{model} attempt {i + 1} failed ({e}); retrying"
                 )
         if i < attempts - 1:
-            # Exponential backoff with jitter to avoid hammering a busy backend.
-            time.sleep(base * (2 ** i) + random.uniform(0, base * 0.5))
-    # Exhausted retries.
+            delay = _retry_wait(last_exc, i, base)
+            if _rate_limited(last_exc):
+                log.bind(task=task).warning(
+                    f"{provider}/{model} rate limited; waiting {delay:.0f}s"
+                )
+            time.sleep(delay)
+        i += 1
     if isinstance(last_exc, Exception):
+        if _rate_limited(last_exc):
+            raise LLMError(
+                "Gemini rate limit (Rate exceeded). The build waited and retried. "
+                "Start it again in a minute, or use gemini-3.8-flash."
+            ) from last_exc
         raise last_exc
     raise LLMError(f"{provider}/{model} produced no content")
 
@@ -461,20 +490,29 @@ def parallel_map(fn, items: list, ordered: bool = True) -> list:
     """
     if not items:
         return []
-    workers = get_settings().effective_llm_parallel()
+    workers = max(1, get_settings().effective_llm_parallel())
     results: list = [None] * len(items)
+    # A short gap between starts. Calls still overlap, they just do not all
+    # hit Gemini in the same instant (that is what triggers "Rate exceeded").
+    gap = 0.45
     if workers <= 1 or len(items) == 1:
         for i, it in enumerate(items):
             try:
                 results[i] = fn(it)
             except Exception as e:  # noqa: BLE001 - captured per-item
                 results[i] = e
+            if i + 1 < len(items):
+                time.sleep(gap)
         return results
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(fn, it): i for i, it in enumerate(items)}
-        for fut in futs:
+        futs = {}
+        for i, it in enumerate(items):
+            futs[ex.submit(fn, it)] = i
+            if i + 1 < len(items):
+                time.sleep(gap)
+        for fut in as_completed(futs):
             i = futs[fut]
             try:
                 results[i] = fut.result()

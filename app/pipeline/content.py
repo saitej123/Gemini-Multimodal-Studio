@@ -134,7 +134,7 @@ Return ONLY a JSON object (no markdown, no code fences) of this exact shape:
       "layout": "bullets",
       "heading": "Short slide heading",
       "bullets": ["concise point", "another point"],
-      "narration": "Spoken explanation of THIS slide only (~{words_per_slide} words). Expressive, human-like narration with conversational warmth, natural pacing, and rhetorical vitality — like a passionate expert explaining to a smart friend.",
+      "narration": "Spoken lines for THIS slide only (~{words_per_slide} words). A person explaining it, with pauses and a change of pace. Not a lesson and not a promo.",
       "equations": [{{"label": "Energy", "tex": "E = mc^2"}}],
       "show_flowchart": true,
       "active_node": "B",
@@ -153,18 +153,16 @@ Return ONLY a JSON object (no markdown, no code fences) of this exact shape:
   ]
 }}
 
-TEACHING GOALS (every slide must serve these):
-- CONCEPT FIRST: name the idea, give a concrete analogy or tiny example, then
-  the mechanism. Prefer "what it is → why it matters → how it works" over lists
-  of facts. If the source is dense, unpack one mechanism per slide.
-- RICH BUT SCANNABLE: on-screen text is short labels; narration carries depth
-  (intuition, trade-offs, pitfalls, "so what?"). Never leave a slide with only
-  one sparse line — fill the visual with 3–6 animated items when it fits.
-- HUMAN-LIKE EXPRESSIONS IN NARRATION: Write spoken lines with authentic human
-  vocal presence — conversational rhythm, natural rhetorical curiosity ("Notice
-  what happens here...", "Why does this matter? Well..."), thoughtful pauses
-  (dashes —, commas), authentic enthusiasm, and relatable framing. Avoid robotic
-  cadence or textbook recitation.
+HOW TO WRITE (every slide):
+- Not a lesson plan and not a content-marketing deck. No "today we will learn",
+  no "key takeaways", no "let's dive in", no classroom voice.
+- Say the thing. A concrete case, the mechanism, the catch. Short labels on
+  screen. The narration is one person talking to one person, not a teacher
+  to a class and not a brand video.
+- On-screen lines stay short enough to fit the card (about 8 words). Depth
+  goes in the narration. 3–5 items when the layout has room, never a wall of text.
+- Narration has a pulse: a pause, a question, a change of pace. No textbook
+  cadence and no hype.
 - ANIMATION-READY: multi-item layouts (flow, steps, hub, bars, compare, stat)
   animate item-by-item in sync with the voice. Put items in the SAME ORDER the
   narration explains them so highlights feel intentional.
@@ -2917,9 +2915,15 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     color:var(--a); background:color-mix(in srgb, var(--a) 12%, transparent);
     box-shadow:none; border:1px solid color-mix(in srgb, var(--a) 40%, transparent);
   }}
-  .b-text {{ font-size:26px; line-height:1.42; color:var(--ink); font-weight:600;
+  .b-text {{ font-size:clamp(16px, 1.35vw, 24px); line-height:1.35; color:var(--ink); font-weight:600;
     overflow-wrap:anywhere; word-break:break-word; text-wrap:pretty;
-    max-width:min(100%, var(--body-max-ch, 38ch)); }}
+    max-width:100%; }}
+  .bullets li, .mx-card, .hub-card, .flow-node, .stat-card, .cmp-col, .step {{
+    min-height:0; max-width:100%;
+  }}
+  h2, .kicker, .cap-text, .step-text, .mx-label, .mx-detail, .hub-label, .flow-label {{
+    overflow-wrap:anywhere; word-break:break-word; max-width:100%;
+  }}
   body.vertical .b-text {{ font-size:29px; }}
 
   /* Hero scene */
@@ -3730,9 +3734,9 @@ _SLIDESHOW_TEMPLATE = """<!DOCTYPE html>
     box-shadow:4px 4px 0 color-mix(in srgb, var(--ink) 12%, transparent);
     background:color-mix(in srgb, var(--panel) 94%, #fff);
   }}
-  body[data-style="whiteboard"] .bullets li {{ min-height:72px; padding:20px 24px; }}
+  body[data-style="whiteboard"] .bullets li {{ min-height:0; padding:14px 18px; }}
   body[data-style="whiteboard"] .mx-card,
-  body[data-style="whiteboard"] .flow-node {{ min-height:128px; }}
+  body[data-style="whiteboard"] .flow-node {{ min-height:0; }}
   body[data-style="whiteboard"] .k-chip {{
     font-family:"Caveat",cursive; font-size:22px; letter-spacing:.02em;
     text-transform:none; border-radius:6px; border-style:dashed; font-weight:600;

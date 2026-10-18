@@ -43,8 +43,8 @@ BLOG VOICE (Karpathy-adjacent technical essay):
 # Spoken narration — expressive human voice powered by Gemini 3.8 Live.
 SPOKEN_VOICE = """
 SPOKEN HUMAN VOICE (narration — voiced by Gemini 3.8 Live):
-- Talk like an engaging teacher on camera: natural conversational rhythm,
-  contractions ok ("here's", "you'll", "that's", "we've").
+- Talk like a person who knows the subject, not a teacher and not an ad.
+  Contractions are fine ("here's", "you'll", "that's").
 - Human-like expressions: authentic curiosity, natural pauses (em-dashes —,
   commas), vocal warmth, and expressive tonal variety that brings ideas alive.
 - Rhetorical hooks and relatable signposting ("Notice how...", "Here's the twist...").

@@ -255,10 +255,9 @@ def custom_prompt_for(age_group: str, knowledge_level: str) -> str:
     age_meta = AGE_GROUPS.get(age) or AGE_GROUPS["auto"]
     know_meta = KNOWLEDGE_LEVELS.get(know) or KNOWLEDGE_LEVELS["auto"]
     bits = [
-        "Make this video engaging, not a textbook dump: hook early, vary rhythm, "
-        "one idea per slide, and speak like an enthusiastic expert talking to a smart friend.",
-        "Deliver rich human-like expression in the narration: use natural conversational curiosity, "
-        "thoughtful pauses, relatable phrasing, and authentic vocal warmth. Never sound like a flat robot.",
+        "Write it straight. No lesson plan, no 'key takeaways', no brand-video voice.",
+        "Short labels on the slide. The spoken line can carry the detail, with a pause "
+        "and a change of pace. Never sound like a flat robot or a classroom.",
         "Keep on-screen labels short; put depth in the narration. Tie spoken beats "
         "to on-screen items in the SAME ORDER so highlights stay in sync with the voice.",
         "Never duplicate a previous slide’s heading, layout+points, or narration. "
