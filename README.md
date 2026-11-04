@@ -45,7 +45,7 @@
 
 | Product | Role in this submission |
 | --- | --- |
-| **Gemini** | Text and vision on `gemini-3.8-flash` or `gemini-4-argon`. Speech on `gemini-3.8-live` (with `gemini-3.8-flash-tts` fallback). Live assistant on `gemini-3.8-live`. Thumbnails on Nano Banana. |
+| **Gemini** | Multimodal text and vision on `gemini-3.8-flash` (or `gemini-4-argon`). Expressive narration on `gemini-3.8-live` (with `gemini-3.8-flash-tts` fallback) across 30 studio voices. Real-time in-app voice assistant (C.H.I.T.T.I.) on `gemini-3.8-live` WebSockets. Live research via Gemini Google Search Grounding. Cloud thumbnails via Gemini image generation (`gemini-3-pro-image` / Nano Banana Pro). Semantic memory embeddings on `text-embedding-004`. |
 | **Cloud Run** | Hosts the FastAPI container. `deploy/cloudbuild.yaml` builds `Dockerfile` and deploys `multimodal-studio`. |
 | **Firebase** | Hosting serves `pitch/` and can rewrite `/app` to the Cloud Run service (`firebase.json`). |
 | **Firestore** | On Cloud Run it is the system of record for what must outlive a container: job snapshots (`studio_jobs`), every LLM/voice call for the cost report (`studio_usage`) and the agent's long-term memory (`studio_agent_memory`). A local run with no credentials stays on SQLite. Browser writes are denied (`firestore.rules`). See `app/firestore_sync.py`. |
@@ -92,13 +92,13 @@ Set `GEMINI_API_KEY` on the Cloud Run service from Secret Manager. Do not commit
 
 | Capability | What you get |
 | --- | --- |
-| **Ingest** | PDF, Word, PowerPoint, TXT, Markdown, images — VLM reads pages (Gemini or local Gemma), with text fallback |
-| **Teach to an audience** | Age group + knowledge level load a teaching prompt you can edit |
-| **Plan long docs** | Split a book/paper into topics, research the web, then one video or many |
+| **Ingest** | PDF, Word, PowerPoint, TXT, Markdown, images — Gemini VLM reads pages (`gemini-3.8-flash` / `gemini-4-argon`), with text fallback |
+| **Teach to an audience** | Gemini adapts pedagogical structure, explanation depth, and tone for the selected age group and knowledge level (editable prompt) |
+| **Plan long docs** | Split a book/paper into topics, fact-ground with Gemini Google Search Grounding, then generate one video or many |
 | **Review** | Duplicate-slide check and voice ↔ highlight sync before you ship |
 | **Publish pack** | Titles, captions, tags, thumbnails for YouTube, Instagram, X, LinkedIn, TikTok, Substack, Medium |
-| **Image lab** | Nano Banana Pro cloud thumbnails (Gemini) plus a prompt-based test generator |
-| **C.H.I.T.T.I.** | In-app voice assistant (Gemini Live) while you work |
+| **Image lab** | Nano Banana Pro cloud thumbnails via Gemini image generation (`gemini-3-pro-image`) plus a prompt-based test generator |
+| **C.H.I.T.T.I.** | In-app full-duplex voice assistant (Gemini 3.8 Live bidirectional WebSockets) while you work |
 | **Admin** | Users, invites, color palette, layout-family preview, social credentials, cron papers, costs |
 | **History** | Every generated session — reopen, re-run, or delete (fills after you run the pipeline) |
 | **Automation** | Admin cron: trending papers (HF / arXiv / Semantic Scholar) → overnight videos |
@@ -154,7 +154,7 @@ flowchart TD
     end
 
     subgraph ExtractStage["2. Extraction & Analysis"]
-        VLM["VLM & Text Extraction<br/>(Gemini 3.8 Flash / Gemma / PyMuPDF)"]
+        VLM["VLM & Text Extraction<br/>(Gemini 3.8 Flash / PyMuPDF)"]
         Analysis["Document Analysis & Tone Classifier<br/>(Equations, Formulas, Complexity)"]
     end
 
@@ -171,10 +171,10 @@ flowchart TD
             T2["recall_memory"]
             T3["save_memory"]
             T4["score_style_and_theme"]
-            T5["research_topic_context"]
+            T5["research_topic_context<br/>(Gemini Search Grounding)"]
             T6["synthesize_visual_layout"]
             T7["audit_and_fix_slides"]
-            T8["draft_slide_deck"]
+            T8["draft_slide_deck<br/>(Gemini 3.8 Flash / Argon)"]
         end
 
         ReAct["Bounded controller<br/>Plan ➔ Tool ➔ Observe ➔ Repair"]
@@ -219,10 +219,10 @@ flowchart TD
 | **Tool: `recall_memory`** | Queries long-term memory via token and tag matching for audience rules and visual pacing. |
 | **Tool: `save_memory`** | Persists run takeaways and user feedback into long-term memory for cross-session adaptation. |
 | **Tool: `score_style_and_theme`** | Evaluates document tone against target audience to score layout styles and color palettes. |
-| **Tool: `research_topic_context`** | Grounds concepts with live web research. Run on demand from Admin → Agent Harness (topic research for a job runs separately, in the pipeline). |
+| **Tool: `research_topic_context`** | Grounds concepts with live web research via Gemini Google Search Grounding. Run on demand from Admin → Agent Harness (topic research for a job runs separately, in the pipeline). |
 | **Tool: `synthesize_visual_layout`** | Asks `layout_engine` whether a list of points fits a collision-free geometry. On demand from the admin tab; the renderer runs the same engine for every slide. |
 | **Tool: `audit_and_fix_slides`** | Deterministic review for duplicate headings, repeated visuals and narration pacing. The controller repairs repeated headings and re-audits. |
-| **Tool: `draft_slide_deck`** | Synthesizes structured slide deck JSON adhering to strict formatting constraints and word budgets. |
+| **Tool: `draft_slide_deck`** | Synthesizes structured slide deck JSON adhering to strict formatting constraints and word budgets using Gemini 3.8 Flash / 4 Argon. |
 
 ### Agent Harness Screenshots & Dashboard
 
@@ -331,7 +331,7 @@ flowchart TD
 4. **Visual style** — leave **Auto**, or pick one of the twelve templates (Whiteboard, Notebook, Chalkboard, Editorial, Magazine, Broadcast, Glass, Bento, Poster, Pop, Cinema, Terminal) and one of 14 color palettes. Admin → Visual styles shows a real render of a sample lesson, made by the same code that films the video.
 5. **Audience** — age + knowledge, or leave Auto. Edit the teaching prompt if you want a custom tone.
 6. **Voices** — preview a Gemini studio voice (default Kore). That voice narrates the whole video.
-7. **Run pipeline**. Watch the strip: Document → VLM extract → Slides → Voiceover → Video → Publish.
+7. **Run pipeline**. Watch the strip: Document → Gemini VLM extract → Gemini Slides → Gemini 3.8 Live voiceover → Video capture → Publish.
 8. **Review** generated slides for duplicates and voice sync. Tweak extracted text or narration and re-run a stage if needed.
 9. **Publish details** — generate per-platform copy, then Post (if credentials are set) or Copy / Download.
 10. **History** — every finished (or in-progress) job lands here so you can reopen it later.
@@ -373,9 +373,13 @@ GPU thumbnail image: `docker compose --profile gpu up --build`
 | Setting | Purpose |
 | --- | --- |
 | `AUTH_ADMIN_EMAIL` / `USERNAME` / `PASSWORD` | Bootstrap admin (required) |
-| `GEMINI_API_KEY` | Cloud LLM, vision extract, Nano Banana thumbnails |
-| `GEMINI_MODEL` | Pinned to `gemini-3.8-flash` (or `gemini-4-argon`) |
-| `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | Expressive narration. Default `gemini-3.8-live` / `Kore` |
+| `GEMINI_API_KEY` | Google Gemini API key (multimodal text, vision, audio, search grounding, images) |
+| `GEMINI_MODEL` | Pinned to `gemini-3.8-flash` (or `gemini-4-argon`) for lesson and slide writing |
+| `GEMINI_VISION_MODEL` | Multimodal VLM for reading document pages and diagrams (default `gemini-3.8-flash`) |
+| `GEMINI_TTS_MODEL` / `GEMINI_TTS_VOICE` | Expressive human narration. Default `gemini-3.8-live` / `Kore` (30 studio voices) |
+| `INTERVIEW_LIVE_MODEL` / `GEMINI_LIVE_VOICE` | C.H.I.T.T.I. real-time full-duplex voice assistant (`gemini-3.8-live` / `Aoede`) |
+| `GEMINI_IMAGE_MODEL` | Nano Banana Pro cloud thumbnail generation (`gemini-3-pro-image`) |
+| `GEMINI_EMBEDDING_MODEL` | Semantic embeddings for memory and concept matching (`text-embedding-004`) |
 | `FIRESTORE_ENABLED` | Use Firestore for job snapshots (`studio_jobs`). Always on in Cloud Run |
 | `GOOGLE_CLOUD_PROJECT` | Firestore project. Set automatically on Cloud Run; locally needs `gcloud auth application-default login` |
 | `GCS_BUCKET` | Private bucket for slide images, audio and the MP4. Empty locally. Cloud Run uses `<project>-studio-media` |
